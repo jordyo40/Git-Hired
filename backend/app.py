@@ -5,6 +5,7 @@ from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from flask_cors import CORS
 import datetime
+import base64
 
 load_dotenv()
 
@@ -27,16 +28,18 @@ candidates_collection = db.get_collection("candidates")
 @app.route("/api/candidates", methods=["POST"])
 def create_candidate():
     try:
-        candidate = request.get_json()
-        if not candidate:
+        data = request.json
+        if not data:
             return jsonify({"error": "Invalid JSON"}), 400
-
-        candidate["createdAt"] = datetime.datetime.now(datetime.timezone.utc)
         
-        result = candidates_collection.insert_one(candidate)
-        candidate["id"] = str(result.inserted_id)
+        # The resume file is expected to be a base64 string
+        # No special handling needed here as it's just a string in the JSON
+        data["createdAt"] = datetime.datetime.now(datetime.timezone.utc)
         
-        return jsonify(candidate), 201
+        result = candidates_collection.insert_one(data)
+        data["_id"] = str(result.inserted_id)
+        
+        return jsonify(data), 201
     except Exception as e:
         print(f"Error creating candidate: {e}")
         return jsonify({"error": "Unable to create candidate"}), 500
@@ -50,9 +53,8 @@ def get_candidates():
 
         candidates = list(candidates_collection.find({"jobId": job_id}).sort("score", -1))
         
-        # Convert ObjectId to string for JSON serialization
         for candidate in candidates:
-            candidate["id"] = str(candidate["id"])
+            candidate["_id"] = str(candidate["_id"])
             
         return jsonify(candidates), 200
     except Exception as e:

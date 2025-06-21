@@ -70,8 +70,7 @@ export function ResumeUpload({ job, open, onOpenChange, onJobUpdate }: ResumeUpl
           // Analyze with Gemini
           const analysis = await analyzeWithGemini(resume, job)
 
-          const candidate: Candidate = {
-            id: Date.now().toString() + i,
+          const candidate: Omit<Candidate, "id"> = {
             name: resume.name,
             email: resume.email,
             github_username: resume.github_username,
@@ -86,19 +85,30 @@ export function ResumeUpload({ job, open, onOpenChange, onJobUpdate }: ResumeUpl
               if (link.includes("portfolio")) type = "portfolio"
               return { url: link, type }
             }),
+            resumeFile: {
+              type: resume.fileType,
+              data: Buffer.from(resume.fileContent).toString("base64"),
+            },
           }
 
-          candidates.push(candidate)
+          // Save candidate to DB
+          const response = await fetch("/api/candidates", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(candidate),
+          })
+
+          if (!response.ok) {
+            throw new Error("Failed to save candidate.")
+          }
+
+          const savedCandidate = await response.json()
+          candidates.push(savedCandidate)
           setResults((prev) => [...prev, `✓ Processed ${resume.name} (Score: ${analysis.overallScore}/100)`])
         } else {
           setResults((prev) => [...prev, `⚠ No GitHub URL found for ${resume.name}`])
         }
       }
-
-      // Save candidates
-      const existingCandidates = JSON.parse(localStorage.getItem("candidates") || "[]")
-      const allCandidates = [...existingCandidates, ...candidates]
-      localStorage.setItem("candidates", JSON.stringify(allCandidates))
 
       // Update job
       const updatedJob = {

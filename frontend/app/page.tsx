@@ -30,6 +30,10 @@ export interface Candidate {
   githubAnalysis: GitHubAnalysis
   jobId: string
   extractedLinks?: ExtractedLink[]
+  resumeFile?: {
+    type: string
+    data: string // base64
+  }
 }
 
 export interface ExtractedLink {

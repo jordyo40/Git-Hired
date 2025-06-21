@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Github, Star, GitCommit, AlertTriangle, CheckCircle, XCircle } from "lucide-react"
-import type { JobPosting, Candidate } from "@/app/page"
+import type { JobPosting, Candidate, ExtractedLink, Repository, ReadmeComparison } from "@/app/page"
 
 interface ResultsDialogProps {
   job: JobPosting
@@ -23,12 +23,23 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
 
   useEffect(() => {
     if (open) {
-      const allCandidates = JSON.parse(localStorage.getItem("candidates") || "[]")
-      const jobCandidates: Candidate[] = allCandidates.filter((c: Candidate) => c.jobId === job.id)
-      setCandidates(jobCandidates.sort((a: Candidate, b: Candidate) => b.score - a.score))
-      if (jobCandidates.length > 0) {
-        setSelectedCandidate(jobCandidates[0])
+      const fetchCandidates = async () => {
+        try {
+          const response = await fetch(`/api/candidates?jobId=${job.id}`)
+          if (response.ok) {
+            const data = await response.json()
+            setCandidates(data)
+            if (data.length > 0) {
+              setSelectedCandidate(data[0])
+            }
+          } else {
+            console.error("Failed to fetch candidates")
+          }
+        } catch (error) {
+          console.error("Error fetching candidates:", error)
+        }
       }
+      fetchCandidates()
     }
   }, [open, job.id])
 
@@ -213,14 +224,39 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                 <TabsContent value="resume" className="space-y-4">
                   <Card>
                     <CardHeader>
-                      <CardTitle>Resume Content</CardTitle>
+                      <CardTitle>Resume</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <ScrollArea className="h-96">
-                        <div className="whitespace-pre-wrap text-sm leading-relaxed">
-                          {selectedCandidate.resumeText}
-                        </div>
-                      </ScrollArea>
+                      {selectedCandidate.resumeFile?.data ? (
+                        <>
+                          {selectedCandidate.resumeFile.type === "application/pdf" ? (
+                            <iframe
+                              src={`data:application/pdf;base64,${selectedCandidate.resumeFile.data}`}
+                              className="w-full h-[600px]"
+                              title={`${selectedCandidate.name}'s resume`}
+                            />
+                          ) : (
+                            <div>
+                              <p className="text-sm text-gray-600 mb-2">
+                                This file type cannot be displayed in the browser.
+                              </p>
+                              <a
+                                href={`data:${selectedCandidate.resumeFile.type};base64,${selectedCandidate.resumeFile.data}`}
+                                download={selectedCandidate.name.replace(/\s/g, "_") + "_resume"}
+                                className="text-blue-600 hover:underline"
+                              >
+                                Download Resume
+                              </a>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <ScrollArea className="h-96">
+                          <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                            {selectedCandidate.resumeText}
+                          </div>
+                        </ScrollArea>
+                      )}
                     </CardContent>
                   </Card>
 
@@ -230,7 +266,7 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-2">
-                        {selectedCandidate.extractedLinks?.map((link, index) => (
+                        {selectedCandidate.extractedLinks?.map((link: ExtractedLink, index: number) => (
                           <div key={index} className="flex items-center gap-2">
                             <Badge variant="outline">{link.type}</Badge>
                             <a
@@ -290,8 +326,8 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                       <ScrollArea className="h-96">
                         <div className="space-y-4">
                           {selectedCandidate.githubAnalysis.repositories
-                            .sort((a, b) => (b.codeQualityScore || 0) - (a.codeQualityScore || 0))
-                            .map((repo) => (
+                            .sort((a: Repository, b: Repository) => (b.codeQualityScore || 0) - (a.codeQualityScore || 0))
+                            .map((repo: Repository) => (
                               <div key={repo.name} className="border rounded-lg p-4">
                                 <div className="flex justify-between items-start mb-3">
                                   <div>
@@ -308,7 +344,7 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                                   <div>
                                     <h5 className="text-sm font-medium mb-1">Technologies Used</h5>
                                     <div className="flex flex-wrap gap-1">
-                                      {repo.technologies?.map((tech) => (
+                                      {repo.technologies?.map((tech: string) => (
                                         <Badge key={tech} variant="secondary" className="text-xs">
                                           {tech}
                                         </Badge>
@@ -348,7 +384,7 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                                   <div className="mt-3 p-2 bg-red-50 rounded border-l-4 border-red-400">
                                     <h6 className="text-sm font-medium text-red-800 mb-1">Code Issues Found</h6>
                                     <ul className="text-xs text-red-700 space-y-1">
-                                      {repo.codeIssues.slice(0, 3).map((issue, index) => (
+                                      {repo.codeIssues.slice(0, 3).map((issue: string, index: number) => (
                                         <li key={index}>• {issue}</li>
                                       ))}
                                       {repo.codeIssues.length > 3 && (
@@ -405,18 +441,19 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-4">
-                        {selectedCandidate.githubAnalysis.readmeComparison?.map((comparison, index) => (
-                          <div key={index} className="border rounded-lg p-3">
-                            <div className="flex justify-between items-center mb-2">
-                              <h5 className="font-medium">{comparison.repository}</h5>
-                              <Badge variant="outline">Similarity: {comparison.similarityScore}%</Badge>
+                        {selectedCandidate.githubAnalysis.readmeComparison?.map(
+                          (comparison: ReadmeComparison, index: number) => (
+                            <div key={index} className="border rounded-lg p-3">
+                              <div className="flex justify-between items-center mb-2">
+                                <h5 className="font-medium">{comparison.repository}</h5>
+                                <Badge variant="outline">Similarity: {comparison.similarityScore}%</Badge>
+                              </div>
+                              <p className="text-sm text-gray-600 mb-2">{comparison.summary}</p>
+                              <div className="text-xs text-gray-500">
+                                <strong>Key Matches:</strong> {comparison.keyMatches.join(", ")}
+                              </div>
                             </div>
-                            <p className="text-sm text-gray-600 mb-2">{comparison.summary}</p>
-                            <div className="text-xs text-gray-500">
-                              <strong>Key Matches:</strong> {comparison.keyMatches.join(", ")}
-                            </div>
-                          </div>
-                        )) || <p className="text-gray-500 text-sm">No README comparison data available</p>}
+                          )) || <p className="text-gray-500 text-sm">No README comparison data available</p>}
                       </div>
                     </CardContent>
                   </Card>

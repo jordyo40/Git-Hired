@@ -11,6 +11,8 @@ export interface ParsedResume {
   text: string
   filename: string
   links: string[]
+  fileContent: ArrayBuffer
+  fileType: string
 }
 
 export async function parseResumes(files: File[]): Promise<ParsedResume[]> {
@@ -19,9 +21,9 @@ export async function parseResumes(files: File[]): Promise<ParsedResume[]> {
   for (const file of files) {
     try {
       let text = ""
+      const arrayBuffer = await file.arrayBuffer()
 
       if (file.type === "application/pdf") {
-        const arrayBuffer = await file.arrayBuffer()
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
         let content = ""
         for (let i = 1; i <= pdf.numPages; i++) {
@@ -31,13 +33,13 @@ export async function parseResumes(files: File[]): Promise<ParsedResume[]> {
         }
         text = content
       } else if (file.type.includes("text") || file.name.endsWith(".txt")) {
-        text = await file.text()
+        // Use TextDecoder to handle ArrayBuffer -> string
+        text = new TextDecoder().decode(arrayBuffer)
       } else if (
         file.name.endsWith(".docx") ||
         file.type ===
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       ) {
-        const arrayBuffer = await file.arrayBuffer()
         const result = await mammoth.extractRawText({ arrayBuffer })
         text = result.value
       } else {
@@ -47,10 +49,13 @@ export async function parseResumes(files: File[]): Promise<ParsedResume[]> {
         continue
       }
 
-      console.log(`TEXT: ${text}`)
       const parsed = extractResumeData(text, file.name)
       if (parsed) {
-        results.push(parsed)
+        results.push({
+          ...parsed,
+          fileContent: arrayBuffer,
+          fileType: file.type,
+        })
       }
     } catch (error) {
       console.error(`Error parsing ${file.name}:`, error)
@@ -60,7 +65,10 @@ export async function parseResumes(files: File[]): Promise<ParsedResume[]> {
   return results
 }
 
-function extractResumeData(text: string, filename: string): ParsedResume | null {
+function extractResumeData(
+  text: string,
+  filename: string,
+): Omit<ParsedResume, "fileContent" | "fileType"> | null {
   // Extract name (first line that looks like a name)
   const nameMatch = text.match(/^([A-Z][a-z]+ [A-Z][a-z]+)/m)
   const name = nameMatch ? nameMatch[1] : filename.replace(/\.[^/.]+$/, "")
