@@ -59,4 +59,13 @@ export async function compareReadmeToJob(
   } catch (error) {
     console.error("Error comparing README to job:", error)
 
-// Fallback to simple keywor
+    // Fallback to a default error state
+    return {
+      repository: repositoryName,
+      similarityScore: 0,
+      summary: "Failed to analyze README due to an error.",
+      keyMatches: [],
+      relevantSections: [],
+    }
+  }
+}

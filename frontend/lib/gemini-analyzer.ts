@@ -5,14 +5,30 @@ import type { JobPosting, GitHubAnalysis, Repository } from "@/app/page"
 
 export interface AnalysisResult {
   overallScore: number
-  githubAnalysis: GitHubAnalysis
   reasoning: string
+  githubAnalysis: GitHubAnalysis
 }
 
 export async function analyzeWithGemini(resume: ParsedResume, job: JobPosting): Promise<AnalysisResult> {
   try {
     // First, fetch GitHub data
-    const githubData = await fetchGitHubData(resume.githubUrl)
+    const githubData = await fetchGitHubData(resume.github_username)
+
+    if (!githubData) {
+      return {
+        overallScore: 0,
+        reasoning: "GitHub data not found",
+        githubAnalysis: {
+          repositories: [],
+          languages: {},
+          totalCommits: 0,
+          totalStars: 0,
+          profileScore: 0,
+          relevanceScore: 0,
+          skillsMatch: [],
+        },
+      }
+    }
 
     // Analyze with Gemini
     const analysis = await analyzeCandidate(resume, job, githubData)
@@ -25,53 +41,56 @@ export async function analyzeWithGemini(resume: ParsedResume, job: JobPosting): 
   }
 }
 
-async function fetchGitHubData(githubUrl: string) {
-  // Extract username from GitHub URL
-  const username = githubUrl.split("/").pop()
-
+async function fetchGitHubData(username: string) {
   if (!username) {
-    throw new Error("Invalid GitHub URL")
+    return null
   }
 
-  // In a real implementation, you'd use the GitHub API
-  // For demo purposes, we'll return mock data
-  return {
-    user: {
-      login: username,
-      name: "Demo User",
-      public_repos: 25,
-      followers: 150,
-      following: 75,
-    },
-    repos: [
-      {
-        name: "react-dashboard",
-        description: "A modern React dashboard with TypeScript and Tailwind CSS",
-        language: "TypeScript",
-        stargazers_count: 45,
-        forks_count: 12,
-        size: 2048,
-        updated_at: "2023-12-01T10:00:00Z",
+  try {
+    // In a real implementation, you'd use the GitHub API
+    // For this demo, we'll simulate the API call and data
+    console.log(`Simulating GitHub API call for user: ${username}`)
+    return {
+      user: {
+        login: username,
+        name: "Demo User",
+        public_repos: 25,
+        followers: 150,
+        following: 75,
       },
-      {
-        name: "node-api-server",
-        description: "RESTful API server built with Node.js and Express",
-        language: "JavaScript",
-        stargazers_count: 23,
-        forks_count: 8,
-        size: 1024,
-        updated_at: "2023-11-15T14:30:00Z",
-      },
-      {
-        name: "python-ml-project",
-        description: "Machine learning project using Python and scikit-learn",
-        language: "Python",
-        stargazers_count: 67,
-        forks_count: 15,
-        size: 3072,
-        updated_at: "2023-10-20T09:15:00Z",
-      },
-    ],
+      repos: [
+        {
+          name: "react-dashboard",
+          description: "A modern React dashboard with TypeScript and Tailwind CSS",
+          language: "TypeScript",
+          stargazers_count: 45,
+          forks_count: 12,
+          size: 2048,
+          updated_at: "2023-12-01T10:00:00Z",
+        },
+        {
+          name: "node-api-server",
+          description: "RESTful API server built with Node.js and Express",
+          language: "JavaScript",
+          stargazers_count: 23,
+          forks_count: 8,
+          size: 1024,
+          updated_at: "2023-11-15T14:30:00Z",
+        },
+        {
+          name: "python-ml-project",
+          description: "Machine learning project using Python and scikit-learn",
+          language: "Python",
+          stargazers_count: 67,
+          forks_count: 15,
+          size: 3072,
+          updated_at: "2023-10-20T09:15:00Z",
+        },
+      ],
+    }
+  } catch (error) {
+    console.error("Error fetching GitHub data:", error)
+    return null
   }
 }
 
@@ -170,8 +189,8 @@ async function analyzeCandidate(resume: ParsedResume, job: JobPosting, githubDat
 
     return {
       overallScore: analysisData.overallScore || 75,
-      githubAnalysis,
       reasoning: analysisData.reasoning || "Analysis completed successfully",
+      githubAnalysis,
     }
   } catch (error) {
     console.error("Error parsing Gemini response:", error)
@@ -216,6 +235,7 @@ function generateMockAnalysis(resume: ParsedResume, job: JobPosting): AnalysisRe
 
   return {
     overallScore,
+    reasoning: `Candidate shows strong technical skills with ${skillsMatch.length} matching required skills. GitHub profile demonstrates consistent activity and relevant project experience.`,
     githubAnalysis: {
       repositories: mockRepos,
       languages: {
@@ -230,6 +250,5 @@ function generateMockAnalysis(resume: ParsedResume, job: JobPosting): AnalysisRe
       relevanceScore: Math.floor(Math.random() * 25) + 65,
       skillsMatch,
     },
-    reasoning: `Candidate shows strong technical skills with ${skillsMatch.length} matching required skills. GitHub profile demonstrates consistent activity and relevant project experience.`,
   }
 }

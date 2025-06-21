@@ -66,7 +66,7 @@ export function ResumeUpload({ job, open, onOpenChange, onJobUpdate }: ResumeUpl
         const resume = parsedResumes[i]
         setProgress(40 + (i / parsedResumes.length) * 40)
 
-        if (resume.githubUrl) {
+        if (resume.github_username) {
           // Analyze with Gemini
           const analysis = await analyzeWithGemini(resume, job)
 
@@ -74,11 +74,18 @@ export function ResumeUpload({ job, open, onOpenChange, onJobUpdate }: ResumeUpl
             id: Date.now().toString() + i,
             name: resume.name,
             email: resume.email,
-            githubUrl: resume.githubUrl,
+            github_username: resume.github_username,
             resumeText: resume.text,
             score: analysis.overallScore,
             githubAnalysis: analysis.githubAnalysis,
             jobId: job.id,
+            extractedLinks: resume.links.map((link) => {
+              let type = "other"
+              if (link.includes("linkedin")) type = "linkedin"
+              if (link.includes("github")) type = "github"
+              if (link.includes("portfolio")) type = "portfolio"
+              return { url: link, type }
+            }),
           }
 
           candidates.push(candidate)
