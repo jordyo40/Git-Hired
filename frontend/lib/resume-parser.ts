@@ -24,7 +24,7 @@ export async function parseResumes(files: File[]): Promise<ParsedResume[]> {
       const arrayBuffer = await file.arrayBuffer()
 
       if (file.type === "application/pdf") {
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise
         let content = ""
         for (let i = 1; i <= pdf.numPages; i++) {
           const page = await pdf.getPage(i)
@@ -40,7 +40,9 @@ export async function parseResumes(files: File[]): Promise<ParsedResume[]> {
         file.type ===
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
       ) {
-        const result = await mammoth.extractRawText({ arrayBuffer })
+        const result = await mammoth.extractRawText({
+          arrayBuffer: arrayBuffer.slice(0),
+        })
         text = result.value
       } else {
         console.warn(

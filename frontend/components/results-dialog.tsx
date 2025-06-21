@@ -227,11 +227,11 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                       <CardTitle>Resume</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      {selectedCandidate.resumeFile?.data ? (
+                      {selectedCandidate.resumeFileId ? (
                         <>
-                          {selectedCandidate.resumeFile.type === "application/pdf" ? (
+                          {selectedCandidate.resumeFileType === "application/pdf" ? (
                             <iframe
-                              src={`data:application/pdf;base64,${selectedCandidate.resumeFile.data}`}
+                              src={`/api/resumes/${selectedCandidate.id}`}
                               className="w-full h-[600px]"
                               title={`${selectedCandidate.name}'s resume`}
                             />
@@ -241,7 +241,7 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                                 This file type cannot be displayed in the browser.
                               </p>
                               <a
-                                href={`data:${selectedCandidate.resumeFile.type};base64,${selectedCandidate.resumeFile.data}`}
+                                href={`/api/resumes/${selectedCandidate.id}`}
                                 download={selectedCandidate.name.replace(/\s/g, "_") + "_resume"}
                                 className="text-blue-600 hover:underline"
                               >

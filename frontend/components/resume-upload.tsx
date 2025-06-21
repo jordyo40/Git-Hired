@@ -70,7 +70,7 @@ export function ResumeUpload({ job, open, onOpenChange, onJobUpdate }: ResumeUpl
           // Analyze with Gemini
           const analysis = await analyzeWithGemini(resume, job)
 
-          const candidate: Omit<Candidate, "id"> = {
+          const newCandidatePayload = {
             name: resume.name,
             email: resume.email,
             github_username: resume.github_username,
@@ -91,26 +91,26 @@ export function ResumeUpload({ job, open, onOpenChange, onJobUpdate }: ResumeUpl
             },
           }
 
-          // Save candidate to DB
           const response = await fetch("/api/candidates", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(candidate),
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(newCandidatePayload),
           })
 
           if (!response.ok) {
             throw new Error("Failed to save candidate.")
           }
 
-          const savedCandidate = await response.json()
+          const savedCandidate: Candidate = await response.json()
           candidates.push(savedCandidate)
-          setResults((prev) => [...prev, `✓ Processed ${resume.name} (Score: ${analysis.overallScore}/100)`])
+          setResults((prev) => [...prev, `✅ Successfully processed ${resume.name}`])
         } else {
           setResults((prev) => [...prev, `⚠ No GitHub URL found for ${resume.name}`])
         }
       }
 
-      // Update job
       const updatedJob = {
         ...job,
         candidateCount: job.candidateCount + candidates.length,
