@@ -8,8 +8,82 @@ import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Github, Star, GitCommit, AlertTriangle, CheckCircle, XCircle } from "lucide-react"
-import type { JobPosting, Candidate, ExtractedLink, Repository, ReadmeComparison } from "@/app/page"
+import { Button } from "@/components/ui/button"
+import { Github, Star, GitCommit, AlertTriangle, CheckCircle, XCircle, Loader2, RefreshCw } from "lucide-react"
+
+// Backend API configuration
+const API_BASE_URL = "http://localhost:5001"
+
+// Type definitions
+interface JobPosting {
+  id: string
+  name: string
+  description: string
+  requiredSkills: string[]
+  niceToHave?: string[]
+  candidateCount?: number
+  status?: "draft" | "active" | "completed"
+}
+
+interface ExtractedLink {
+  url: string
+  type: string
+}
+
+interface Repository {
+  name: string
+  description: string
+  language: string
+  stars: number
+  commits: number
+  relevanceScore: number
+  codeQualityScore: number
+  linesOfCode: number
+  fileCount: number
+  complexityScore: number
+  technologies: string[]
+  codeIssues: string[]
+}
+
+interface ReadmeComparison {
+  repository: string
+  similarityScore: number
+  summary: string
+  keyMatches: string[]
+}
+
+interface Candidate {
+  id: string
+  name: string
+  email: string
+  githubUrl: string
+  githubUsername?: string
+  github_username?: string
+  resumeText: string
+  resumeFileId?: string
+  resumeFileType?: string
+  score: number
+  jobId: string
+  githubAnalysis: {
+    technicalScore: number
+    relevanceScore: number
+    codeQualityScore: number
+    activityScore: number
+    totalStars: number
+    totalLinesOfCode: number
+    repositories: Repository[]
+    languageProficiency: Record<string, { score: number; linesOfCode: number; repositories: number }>
+    skillsMatch: string[]
+    skillProficiency: Record<string, number>
+    readmeComparison?: ReadmeComparison[]
+  }
+  extractedLinks?: ExtractedLink[]
+  // Backend analysis data
+  deepAnalysis?: any
+  readmeAnalysis?: any
+  matchingResults?: any
+  activityData?: any
+}
 
 interface ResultsDialogProps {
   job: JobPosting
@@ -17,39 +91,294 @@ interface ResultsDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+// Helper functions
+const getGitHubUsername = (candidate: Candidate): string => {
+  const username = candidate.github_username || candidate.githubUsername || ""
+  return username
+}
+
+const extractUsernameFromUrl = (githubUrl: string): string => {
+  if (!githubUrl) return ""
+  const match = githubUrl.match(/github\.com\/([^/]+)/)
+  return match ? match[1] : ""
+}
+
 export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
   const [candidates, setCandidates] = useState<Candidate[]>([])
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [analyzing, setAnalyzing] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
+  // Fetch candidates and perform comprehensive analysis
   useEffect(() => {
     if (open) {
-      const fetchCandidates = async () => {
-        try {
-          const response = await fetch(`/api/candidates?jobId=${job.id}`)
-          if (response.ok) {
-            const data = await response.json()
-            setCandidates(data)
-            if (data.length > 0) {
-              setSelectedCandidate(data[0])
-            }
-          } else {
-            console.error("Failed to fetch candidates")
-          }
-        } catch (error) {
-          console.error("Error fetching candidates:", error)
-        }
-      }
-      fetchCandidates()
+      fetchAndAnalyzeCandidates()
     }
   }, [open, job.id])
 
+  const fetchAndAnalyzeCandidates = async () => {
+    setLoading(true)
+    setError(null)
+    setAnalyzing("Fetching candidates...")
+
+    try {
+      // Fetch candidates from backend API
+      const candidatesResponse = await fetch(`${API_BASE_URL}/api/candidates?jobId=${job.id}`)
+
+      if (!candidatesResponse.ok) {
+        throw new Error("Failed to fetch candidates")
+      }
+
+      const jobCandidates: Candidate[] = await candidatesResponse.json()
+
+      if (jobCandidates.length === 0) {
+        setError("No candidates found for this job")
+        setLoading(false)
+        return
+      }
+
+      console.log(`Found ${jobCandidates.length} candidates for analysis`)
+
+      // Analyze each candidate with comprehensive backend analysis
+      const analyzedCandidates: Candidate[] = []
+
+      for (const candidate of jobCandidates) {
+        const githubUsername = getGitHubUsername(candidate) || extractUsernameFromUrl(candidate.githubUrl)
+
+        if (!githubUsername) {
+          console.log(`No GitHub username found for ${candidate.name}`)
+          // Add candidate without analysis
+          analyzedCandidates.push({
+            ...candidate,
+            score: 0,
+            githubAnalysis: {
+              technicalScore: 0,
+              relevanceScore: 0,
+              codeQualityScore: 0,
+              activityScore: 0,
+              totalStars: 0,
+              totalLinesOfCode: 0,
+              repositories: [],
+              languageProficiency: {},
+              skillsMatch: [],
+              skillProficiency: {},
+            },
+          })
+          continue
+        }
+
+        setAnalyzing(`Analyzing ${candidate.name} (${githubUsername})...`)
+
+        try {
+          // Perform comprehensive analysis using backend APIs
+          const analysisResults = await performComprehensiveBackendAnalysis(githubUsername, candidate, job)
+          analyzedCandidates.push(analysisResults)
+        } catch (analysisError) {
+          console.error(`Analysis failed for ${githubUsername}:`, analysisError)
+          // Add candidate with basic info but no analysis
+          analyzedCandidates.push({
+            ...candidate,
+            score: 0,
+            githubAnalysis: {
+              technicalScore: 0,
+              relevanceScore: 0,
+              codeQualityScore: 0,
+              activityScore: 0,
+              totalStars: 0,
+              totalLinesOfCode: 0,
+              repositories: [],
+              languageProficiency: {},
+              skillsMatch: [],
+              skillProficiency: {},
+            },
+          })
+        }
+      }
+
+      // Sort by score
+      analyzedCandidates.sort((a, b) => b.score - a.score)
+      setCandidates(analyzedCandidates)
+
+      if (analyzedCandidates.length > 0) {
+        setSelectedCandidate(analyzedCandidates[0])
+      }
+    } catch (error) {
+      console.error("Error fetching candidates:", error)
+      setError("Failed to analyze candidates")
+    } finally {
+      setLoading(false)
+      setAnalyzing(null)
+    }
+  }
+
+  const performComprehensiveBackendAnalysis = async (
+    username: string,
+    candidate: Candidate,
+    job: JobPosting,
+  ): Promise<Candidate> => {
+    try {
+      console.log(`Starting comprehensive analysis for ${username}`)
+
+      // 1. Deep GitHub Analysis
+      setAnalyzing(`Deep GitHub analysis for ${candidate.name}...`)
+      const deepAnalysisResponse = await fetch(`${API_BASE_URL}/deep-search/${username}`)
+      const deepAnalysis = deepAnalysisResponse.ok ? await deepAnalysisResponse.json() : null
+
+      // 2. Activity Score Analysis
+      setAnalyzing(`Activity scoring for ${candidate.name}...`)
+      const activityResponse = await fetch(`${API_BASE_URL}/activity-score/${username}`)
+      const activityData = activityResponse.ok ? await activityResponse.json() : null
+
+      // 3. README Quality Analysis
+      setAnalyzing(`README analysis for ${candidate.name}...`)
+      const readmeResponse = await fetch(`${API_BASE_URL}/readme-analysis/${username}`)
+      const readmeAnalysis = readmeResponse.ok ? await readmeResponse.json() : null
+
+      // 4. AI-Powered Job Matching
+      setAnalyzing(`AI job matching for ${candidate.name}...`)
+      const matchingPayload = {
+        job_description: job.description,
+        required_skills: job.requiredSkills,
+        nice_to_have: job.niceToHave || [],
+        candidate_data: {
+          top_repos: deepAnalysis?.repo_details?.slice(0, 10) || [],
+          detected_skills: deepAnalysis?.skills_analysis?.all_inferred_skills || {},
+          top_languages: deepAnalysis?.language_distribution || {},
+        },
+      }
+
+      const matchingResponse = await fetch(`${API_BASE_URL}/match-candidate-ai/${username}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(matchingPayload),
+      })
+      const matchingResults = matchingResponse.ok ? await matchingResponse.json() : null
+
+      // Calculate comprehensive scores using backend data
+      const technicalScore = calculateTechnicalScore(deepAnalysis)
+      const relevanceScore = matchingResults?.total_match_percentage || 0
+      const codeQualityScore = readmeAnalysis?.overall_readme_score || 0
+      const activityScore = activityData?.activity_score || 0
+
+      // Calculate overall score (weighted)
+      const overallScore = Math.round(
+        technicalScore * 0.4 + relevanceScore * 0.35 + codeQualityScore * 0.15 + activityScore * 0.1,
+      )
+
+      // Transform backend data to match frontend interface
+      const githubAnalysis = {
+        technicalScore,
+        relevanceScore,
+        codeQualityScore,
+        activityScore,
+        totalStars: deepAnalysis?.popularity_metrics?.total_stars || 0,
+        totalLinesOfCode:
+          deepAnalysis?.repo_details?.reduce((sum: number, repo: any) => sum + (repo.linesOfCode || 0), 0) || 0,
+        repositories: transformRepositories(deepAnalysis?.repo_details || [], matchingResults),
+        languageProficiency: transformLanguageProficiency(
+          deepAnalysis?.language_distribution,
+          deepAnalysis?.commits_per_language,
+        ),
+        skillsMatch: calculateSkillsMatch(job.requiredSkills, deepAnalysis?.skills_analysis?.all_inferred_skills || {}),
+        skillProficiency: deepAnalysis?.skills_analysis?.all_inferred_skills || {},
+        readmeComparison: transformReadmeComparison(readmeAnalysis?.readme_analyses || []),
+      }
+
+      console.log(`Analysis completed for ${username} with score: ${overallScore}`)
+
+      return {
+        ...candidate,
+        score: overallScore,
+        githubAnalysis,
+        deepAnalysis,
+        readmeAnalysis,
+        matchingResults,
+        activityData,
+      }
+    } catch (error) {
+      console.error(`Comprehensive analysis failed for ${username}:`, error)
+      throw error
+    }
+  }
+
+  // Helper functions for data transformation
+  const calculateTechnicalScore = (deepAnalysis: any): number => {
+    if (!deepAnalysis) return 0
+
+    const languageCount = Object.keys(deepAnalysis.language_distribution || {}).length
+    const skillCount = Object.keys(deepAnalysis.skills_analysis?.all_inferred_skills || {}).length
+    const avgStars = deepAnalysis.popularity_metrics?.avg_stars_per_repo || 0
+    const totalCommits = deepAnalysis.activity_metrics?.total_commits || 0
+
+    // Weighted technical scoring
+    const languageScore = Math.min(languageCount * 10, 30)
+    const skillScore = Math.min(skillCount * 2, 40)
+    const popularityScore = Math.min(avgStars * 5, 20)
+    const activityScore = Math.min(totalCommits / 50, 10)
+
+    return Math.round(languageScore + skillScore + popularityScore + activityScore)
+  }
+
+  const transformRepositories = (repoDetails: any[], matchingResults: any): Repository[] => {
+    return (repoDetails || []).map((repo: any) => ({
+      name: repo.name || "",
+      description: repo.description || "",
+      language: repo.language || "",
+      stars: repo.stars || 0,
+      commits: repo.commits || 0,
+      relevanceScore: matchingResults?.repo_matches?.find((m: any) => m.repo_name === repo.name)?.match_percentage || 0,
+      codeQualityScore: Math.min((repo.readme_content?.length || 0) / 10, 100),
+      linesOfCode: repo.linesOfCode || 0,
+      fileCount: repo.fileCount || 0,
+      complexityScore: repo.complexityScore || 0,
+      technologies: repo.detected_skills || [],
+      codeIssues: [],
+    }))
+  }
+
+  const transformLanguageProficiency = (langDist: any, commitsDist: any) => {
+    const result: Record<string, { score: number; linesOfCode: number; repositories: number }> = {}
+
+    if (langDist) {
+      Object.entries(langDist).forEach(([lang, repoCount]) => {
+        const commits = commitsDist?.[lang] || 0
+        result[lang] = {
+          score: Math.min((repoCount as number) * 20 + (commits as number) / 10, 100),
+          linesOfCode: (commits as number) * 50, // Estimate
+          repositories: repoCount as number,
+        }
+      })
+    }
+
+    return result
+  }
+
+  const calculateSkillsMatch = (requiredSkills: string[], detectedSkills: Record<string, number>): string[] => {
+    return requiredSkills.filter((skill) =>
+      Object.keys(detectedSkills).some((detectedSkill) => detectedSkill.toLowerCase().includes(skill.toLowerCase())),
+    )
+  }
+
+  const transformReadmeComparison = (readmeAnalyses: any[]): ReadmeComparison[] => {
+    return (readmeAnalyses || []).slice(0, 5).map((analysis: any) => ({
+      repository: analysis.repo_name,
+      similarityScore: analysis.readme_score,
+      summary: analysis.feedback,
+      keyMatches: analysis.strengths,
+    }))
+  }
+
+  // UI helper functions
   const getScoreColor = (score: number) => {
     if (score >= 80) return "text-green-600"
     if (score >= 60) return "text-yellow-600"
     return "text-red-600"
   }
 
-  const getScoreBadgeVariant = (score: number) => {
+  const getScoreBadgeVariant = (score: number): "default" | "secondary" | "destructive" => {
     if (score >= 80) return "default"
     if (score >= 60) return "secondary"
     return "destructive"
@@ -68,11 +397,59 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
     return `//${url}`
   }
 
+  // Loading state
+  if (loading) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Analyzing Candidates</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center justify-center py-8 space-y-4">
+            <Loader2 className="w-8 h-8 animate-spin" />
+            <p className="text-sm text-gray-600 text-center">
+              {analyzing || "Performing comprehensive GitHub analysis..."}
+            </p>
+            <p className="text-xs text-gray-500 text-center">This may take a few minutes for detailed analysis</p>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Analysis Error</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-col items-center justify-center py-8 space-y-4">
+            <AlertTriangle className="w-8 h-8 text-red-500" />
+            <p className="text-sm text-gray-600 text-center">{error}</p>
+            <Button onClick={fetchAndAnalyzeCandidates} variant="outline">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Retry Analysis
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  // Main dialog content
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-7xl max-h-[90vh] overflow-hidden">
         <DialogHeader>
-          <DialogTitle>Analysis Results - {job.name}</DialogTitle>
+          <DialogTitle className="flex items-center justify-between">
+            <span>Analysis Results - {job.name}</span>
+            <Button onClick={fetchAndAnalyzeCandidates} variant="outline" size="sm">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Refresh Analysis
+            </Button>
+          </DialogTitle>
         </DialogHeader>
 
         <div className="flex gap-6 h-[calc(90vh-120px)]">
@@ -106,11 +483,19 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                     <CardContent className="pt-0">
                       <div className="flex items-center gap-2 text-xs text-gray-600 mb-2">
                         <Github className="w-3 h-3" />
-                        <span className="truncate">{candidate.github_username}</span>
+                        <span className="truncate">
+                          {getGitHubUsername(candidate) ||
+                            extractUsernameFromUrl(candidate.githubUrl) ||
+                            "No GitHub found"}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2 text-xs text-gray-600 mb-2">
                         {getCodeQualityIcon(candidate.githubAnalysis.codeQualityScore || 0)}
                         <span>Code Quality: {candidate.githubAnalysis.codeQualityScore || 0}/100</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-gray-600 mb-2">
+                        <Star className="w-3 h-3" />
+                        <span>Total Stars: {candidate.githubAnalysis.totalStars}</span>
                       </div>
                       <Progress value={candidate.score} className="h-1" />
                     </CardContent>
@@ -124,11 +509,12 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
           {selectedCandidate && (
             <div className="flex-1 overflow-y-auto">
               <Tabs defaultValue="overview" className="h-full">
-                <TabsList className="grid w-full grid-cols-4">
+                <TabsList className="grid w-full grid-cols-5">
                   <TabsTrigger value="overview">Overview</TabsTrigger>
                   <TabsTrigger value="resume">Resume</TabsTrigger>
                   <TabsTrigger value="github">GitHub Analysis</TabsTrigger>
-                  <TabsTrigger value="comparison">Job Comparison</TabsTrigger>
+                  <TabsTrigger value="comparison">Job Matching</TabsTrigger>
+                  <TabsTrigger value="insights">AI Insights</TabsTrigger>
                 </TabsList>
 
                 <TabsContent value="overview" className="space-y-4">
@@ -149,30 +535,46 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <h4 className="font-medium mb-2">GitHub Profile</h4>
-                          <a
-                            href={`https://github.com/${selectedCandidate.github_username}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:underline flex items-center gap-1"
-                          >
-                            <Github className="w-4 h-4" />
-                            View Profile
-                          </a>
+                          {getGitHubUsername(selectedCandidate) ||
+                          extractUsernameFromUrl(selectedCandidate.githubUrl) ? (
+                            <a
+                              href={`https://github.com/${getGitHubUsername(selectedCandidate) || extractUsernameFromUrl(selectedCandidate.githubUrl)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:underline flex items-center gap-1"
+                            >
+                              <Github className="w-4 h-4" />
+                              {getGitHubUsername(selectedCandidate) ||
+                                extractUsernameFromUrl(selectedCandidate.githubUrl)}
+                            </a>
+                          ) : (
+                            <div className="flex items-center gap-1 text-gray-500">
+                              <Github className="w-4 h-4" />
+                              <span className="text-sm">No GitHub profile found</span>
+                            </div>
+                          )}
                         </div>
                         <div>
                           <h4 className="font-medium mb-2">Profile Stats</h4>
                           <div className="space-y-1 text-sm">
                             <div className="flex justify-between">
                               <span>Total Repositories:</span>
-                              <span>{selectedCandidate.githubAnalysis.repositories.length}</span>
+                              <span>
+                                {selectedCandidate.deepAnalysis?.user_info?.public_repos ||
+                                  selectedCandidate.githubAnalysis.repositories.length}
+                              </span>
                             </div>
                             <div className="flex justify-between">
                               <span>Total Stars:</span>
                               <span>{selectedCandidate.githubAnalysis.totalStars}</span>
                             </div>
                             <div className="flex justify-between">
-                              <span>Lines of Code:</span>
-                              <span>{selectedCandidate.githubAnalysis.totalLinesOfCode || 0}</span>
+                              <span>Total Commits:</span>
+                              <span>{selectedCandidate.deepAnalysis?.activity_metrics?.total_commits || 0}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span>Primary Language:</span>
+                              <span>{selectedCandidate.deepAnalysis?.insights?.primary_language || "Unknown"}</span>
                             </div>
                           </div>
                         </div>
@@ -189,9 +591,9 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                         <div>
                           <div className="flex justify-between mb-1">
                             <span className="text-sm">Technical Proficiency (40%)</span>
-                            <span className="text-sm">{selectedCandidate.githubAnalysis.technicalScore || 0}/100</span>
+                            <span className="text-sm">{selectedCandidate.githubAnalysis.technicalScore}/100</span>
                           </div>
-                          <Progress value={selectedCandidate.githubAnalysis.technicalScore || 0} />
+                          <Progress value={selectedCandidate.githubAnalysis.technicalScore} />
                         </div>
                         <div>
                           <div className="flex justify-between mb-1">
@@ -203,18 +605,16 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                         <div>
                           <div className="flex justify-between mb-1">
                             <span className="text-sm">Code Quality (15%)</span>
-                            <span className="text-sm">
-                              {selectedCandidate.githubAnalysis.codeQualityScore || 0}/100
-                            </span>
+                            <span className="text-sm">{selectedCandidate.githubAnalysis.codeQualityScore}/100</span>
                           </div>
-                          <Progress value={selectedCandidate.githubAnalysis.codeQualityScore || 0} />
+                          <Progress value={selectedCandidate.githubAnalysis.codeQualityScore} />
                         </div>
                         <div>
                           <div className="flex justify-between mb-1">
                             <span className="text-sm">Activity & Growth (10%)</span>
-                            <span className="text-sm">{selectedCandidate.githubAnalysis.activityScore || 0}/100</span>
+                            <span className="text-sm">{selectedCandidate.githubAnalysis.activityScore}/100</span>
                           </div>
-                          <Progress value={selectedCandidate.githubAnalysis.activityScore || 0} />
+                          <Progress value={selectedCandidate.githubAnalysis.activityScore} />
                         </div>
                       </div>
                     </CardContent>
@@ -231,7 +631,7 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                         <>
                           {selectedCandidate.resumeFileType === "application/pdf" ? (
                             <iframe
-                              src={`/api/resumes/${selectedCandidate.id}`}
+                              src={`${API_BASE_URL}/api/resumes/${selectedCandidate.id}`}
                               className="w-full h-[600px]"
                               title={`${selectedCandidate.name}'s resume`}
                             />
@@ -241,7 +641,7 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                                 This file type cannot be displayed in the browser.
                               </p>
                               <a
-                                href={`/api/resumes/${selectedCandidate.id}`}
+                                href={`${API_BASE_URL}/api/resumes/${selectedCandidate.id}`}
                                 download={selectedCandidate.name.replace(/\s/g, "_") + "_resume"}
                                 className="text-blue-600 hover:underline"
                               >
@@ -266,7 +666,7 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-2">
-                        {selectedCandidate.extractedLinks?.map((link: ExtractedLink, index: number) => (
+                        {selectedCandidate.extractedLinks?.map((link, index) => (
                           <div key={index} className="flex items-center gap-2">
                             <Badge variant="outline">{link.type}</Badge>
                             <a
@@ -290,31 +690,35 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                       <CardTitle>Programming Languages & Proficiency</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="space-y-3">
-                        {Object.entries(selectedCandidate.githubAnalysis.languageProficiency || {})
-                          .sort(([, a], [, b]) => (b as any).score - (a as any).score)
-                          .slice(0, 8)
-                          .map(([language, data]) => {
-                            const proficiency = data as any
-                            return (
-                              <div key={language} className="space-y-1">
-                                <div className="flex justify-between items-center">
-                                  <span className="text-sm font-medium">{language}</span>
-                                  <div className="flex items-center gap-2">
-                                    <Badge variant="outline" className="text-xs">
-                                      {proficiency.linesOfCode} lines
-                                    </Badge>
-                                    <span className="text-sm">{proficiency.score}/100</span>
+                      {Object.keys(selectedCandidate.githubAnalysis.languageProficiency || {}).length > 0 ? (
+                        <div className="space-y-3">
+                          {Object.entries(selectedCandidate.githubAnalysis.languageProficiency || {})
+                            .sort(([, a], [, b]) => (b as any).score - (a as any).score)
+                            .slice(0, 8)
+                            .map(([language, data]) => {
+                              const proficiency = data as any
+                              return (
+                                <div key={language} className="space-y-1">
+                                  <div className="flex justify-between items-center">
+                                    <span className="text-sm font-medium">{language}</span>
+                                    <div className="flex items-center gap-2">
+                                      <Badge variant="outline" className="text-xs">
+                                        {proficiency.repositories} repos
+                                      </Badge>
+                                      <span className="text-sm">{Math.round(proficiency.score)}/100</span>
+                                    </div>
                                   </div>
+                                  <Progress value={proficiency.score} />
                                 </div>
-                                <Progress value={proficiency.score} />
-                                <div className="text-xs text-gray-600">
-                                  Used in {proficiency.repositories} repositories
-                                </div>
-                              </div>
-                            )
-                          })}
-                      </div>
+                              )
+                            })}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 text-gray-500">
+                          <Github className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                          <p>No GitHub analysis data available</p>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
 
@@ -323,80 +727,74 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                       <CardTitle>Repository Analysis</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <ScrollArea className="h-96">
-                        <div className="space-y-4">
-                          {selectedCandidate.githubAnalysis.repositories
-                            .sort((a: Repository, b: Repository) => (b.codeQualityScore || 0) - (a.codeQualityScore || 0))
-                            .map((repo: Repository) => (
-                              <div key={repo.name} className="border rounded-lg p-4">
-                                <div className="flex justify-between items-start mb-3">
-                                  <div>
-                                    <h4 className="font-medium">{repo.name}</h4>
-                                    <p className="text-sm text-gray-600 mt-1">{repo.description}</p>
-                                  </div>
-                                  <div className="flex flex-col gap-1">
-                                    <Badge variant="outline">Relevance: {repo.relevanceScore}/100</Badge>
-                                    <Badge variant="outline">Code Quality: {repo.codeQualityScore || 0}/100</Badge>
-                                  </div>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-4 mb-3">
-                                  <div>
-                                    <h5 className="text-sm font-medium mb-1">Technologies Used</h5>
-                                    <div className="flex flex-wrap gap-1">
-                                      {repo.technologies?.map((tech: string) => (
-                                        <Badge key={tech} variant="secondary" className="text-xs">
-                                          {tech}
-                                        </Badge>
-                                      )) || (
-                                        <Badge variant="secondary" className="text-xs">
-                                          {repo.language}
-                                        </Badge>
-                                      )}
+                      {selectedCandidate.githubAnalysis.repositories.length > 0 ? (
+                        <ScrollArea className="h-96">
+                          <div className="space-y-4">
+                            {selectedCandidate.githubAnalysis.repositories
+                              .sort((a, b) => b.stars - a.stars)
+                              .slice(0, 10)
+                              .map((repo) => (
+                                <div key={repo.name} className="border rounded-lg p-4">
+                                  <div className="flex justify-between items-start mb-3">
+                                    <div>
+                                      <h4 className="font-medium">{repo.name}</h4>
+                                      <p className="text-sm text-gray-600 mt-1">{repo.description}</p>
+                                    </div>
+                                    <div className="flex flex-col gap-1">
+                                      <Badge variant="outline">Relevance: {repo.relevanceScore}/100</Badge>
+                                      <Badge variant="outline">Quality: {Math.round(repo.codeQualityScore)}/100</Badge>
                                     </div>
                                   </div>
-                                  <div>
-                                    <h5 className="text-sm font-medium mb-1">Code Metrics</h5>
-                                    <div className="text-xs text-gray-600 space-y-1">
-                                      <div>Lines of Code: {repo.linesOfCode || "N/A"}</div>
-                                      <div>Files: {repo.fileCount || "N/A"}</div>
-                                      <div>Complexity Score: {repo.complexityScore || "N/A"}/100</div>
+
+                                  <div className="grid grid-cols-2 gap-4 mb-3">
+                                    <div>
+                                      <h5 className="text-sm font-medium mb-1">Technologies</h5>
+                                      <div className="flex flex-wrap gap-1">
+                                        {repo.technologies?.slice(0, 5).map((tech) => (
+                                          <Badge key={tech} variant="secondary" className="text-xs">
+                                            {tech}
+                                          </Badge>
+                                        )) || (
+                                          <Badge variant="secondary" className="text-xs">
+                                            {repo.language}
+                                          </Badge>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div>
+                                      <h5 className="text-sm font-medium mb-1">Metrics</h5>
+                                      <div className="text-xs text-gray-600 space-y-1">
+                                        <div>Stars: {repo.stars}</div>
+                                        <div>Commits: {repo.commits}</div>
+                                        <div>Language: {repo.language}</div>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-4 text-xs text-gray-500">
+                                    <div className="flex items-center gap-1">
+                                      <Star className="w-3 h-3" />
+                                      {repo.stars}
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <GitCommit className="w-3 h-3" />
+                                      {repo.commits} commits
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      {getCodeQualityIcon(repo.codeQualityScore)}
+                                      Quality Score
                                     </div>
                                   </div>
                                 </div>
-
-                                <div className="flex items-center gap-4 text-xs text-gray-500">
-                                  <div className="flex items-center gap-1">
-                                    <Star className="w-3 h-3" />
-                                    {repo.stars}
-                                  </div>
-                                  <div className="flex items-center gap-1">
-                                    <GitCommit className="w-3 h-3" />
-                                    {repo.commits} commits
-                                  </div>
-                                  <div className="flex items-center gap-1">
-                                    {getCodeQualityIcon(repo.codeQualityScore || 0)}
-                                    Quality Score
-                                  </div>
-                                </div>
-
-                                {repo.codeIssues && repo.codeIssues.length > 0 && (
-                                  <div className="mt-3 p-2 bg-red-50 rounded border-l-4 border-red-400">
-                                    <h6 className="text-sm font-medium text-red-800 mb-1">Code Issues Found</h6>
-                                    <ul className="text-xs text-red-700 space-y-1">
-                                      {repo.codeIssues.slice(0, 3).map((issue: string, index: number) => (
-                                        <li key={index}>• {issue}</li>
-                                      ))}
-                                      {repo.codeIssues.length > 3 && (
-                                        <li>• +{repo.codeIssues.length - 3} more issues</li>
-                                      )}
-                                    </ul>
-                                  </div>
-                                )}
-                              </div>
-                            ))}
+                              ))}
+                          </div>
+                        </ScrollArea>
+                      ) : (
+                        <div className="text-center py-8 text-gray-500">
+                          <GitCommit className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                          <p>No repository data available</p>
                         </div>
-                      </ScrollArea>
+                      )}
                     </CardContent>
                   </Card>
                 </TabsContent>
@@ -420,7 +818,11 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                                 >
                                   {skill} {isMatched && "✓"}
                                 </Badge>
-                                {isMatched && <span className="text-xs text-gray-600">({proficiency}/100)</span>}
+                                {isMatched && (
+                                  <span className="text-xs text-gray-600">
+                                    ({Math.round(proficiency as number)}/100)
+                                  </span>
+                                )}
                               </div>
                             )
                           })}
@@ -435,76 +837,210 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                     </CardContent>
                   </Card>
 
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>README vs Job Description Similarity</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-4">
-                        {selectedCandidate.githubAnalysis.readmeComparison?.map(
-                          (comparison: ReadmeComparison, index: number) => (
-                            <div key={index} className="border rounded-lg p-3">
-                              <div className="flex justify-between items-center mb-2">
-                                <h5 className="font-medium">{comparison.repository}</h5>
-                                <Badge variant="outline">Similarity: {comparison.similarityScore}%</Badge>
-                              </div>
-                              <p className="text-sm text-gray-600 mb-2">{comparison.summary}</p>
-                              <div className="text-xs text-gray-500">
-                                <strong>Key Matches:</strong> {comparison.keyMatches.join(", ")}
-                              </div>
+                  {selectedCandidate.matchingResults && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>AI-Powered Repository Matching</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-4">
+                          <div className="text-center p-4 bg-blue-50 rounded-lg">
+                            <div className="text-2xl font-bold text-blue-600">
+                              {selectedCandidate.matchingResults.total_match_percentage}%
                             </div>
-                          )) || <p className="text-gray-500 text-sm">No README comparison data available</p>}
-                      </div>
-                    </CardContent>
-                  </Card>
+                            <div className="text-sm text-blue-800">Overall Job Match</div>
+                          </div>
+
+                          <div className="space-y-2">
+                            <h5 className="font-medium">Repository Match Breakdown:</h5>
+                            {selectedCandidate.matchingResults.repo_matches
+                              .slice(0, 8)
+                              .map((match: any, index: number) => (
+                                <div key={index} className="flex justify-between items-center p-2 border rounded">
+                                  <span className="text-sm font-medium">{match.repo_name}</span>
+                                  <Badge
+                                    variant={
+                                      match.match_percentage >= 70
+                                        ? "default"
+                                        : match.match_percentage >= 40
+                                          ? "secondary"
+                                          : "outline"
+                                    }
+                                  >
+                                    {match.match_percentage}%
+                                  </Badge>
+                                </div>
+                              ))}
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
 
                   <Card>
                     <CardHeader>
-                      <CardTitle>Comprehensive Grading Criteria</CardTitle>
+                      <CardTitle>README vs Job Description Analysis</CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <h4 className="font-medium text-sm">Technical Proficiency (40%)</h4>
-                            <ul className="text-xs text-gray-600 space-y-1">
-                              <li>• Code complexity and architecture (15%)</li>
-                              <li>• Language expertise and best practices (10%)</li>
-                              <li>• Documentation and comments (8%)</li>
-                              <li>• Error handling and security (7%)</li>
-                            </ul>
+                        {selectedCandidate.githubAnalysis.readmeComparison?.map((comparison, index) => (
+                          <div key={index} className="border rounded-lg p-3">
+                            <div className="flex justify-between items-center mb-2">
+                              <h5 className="font-medium">{comparison.repository}</h5>
+                              <Badge variant="outline">Score: {comparison.similarityScore}%</Badge>
+                            </div>
+                            <p className="text-sm text-gray-600 mb-2">{comparison.summary}</p>
+                            <div className="text-xs text-gray-500">
+                              <strong>Strengths:</strong> {comparison.keyMatches.join(", ")}
+                            </div>
                           </div>
-                          <div className="space-y-2">
-                            <h4 className="font-medium text-sm">Job Relevance (35%)</h4>
-                            <ul className="text-xs text-gray-600 space-y-1">
-                              <li>• Project similarity to job requirements (15%)</li>
-                              <li>• Required skills demonstration (10%)</li>
-                              <li>• Industry-relevant experience (5%)</li>
-                              <li>• Technology stack alignment (5%)</li>
-                            </ul>
-                          </div>
-                          <div className="space-y-2">
-                            <h4 className="font-medium text-sm">Code Quality (15%)</h4>
-                            <ul className="text-xs text-gray-600 space-y-1">
-                              <li>• Code readability and structure (6%)</li>
-                              <li>• Testing and CI/CD practices (4%)</li>
-                              <li>• Security vulnerabilities (-20 points)</li>
-                              <li>• Performance optimizations (5%)</li>
-                            </ul>
-                          </div>
-                          <div className="space-y-2">
-                            <h4 className="font-medium text-sm">Activity & Growth (10%)</h4>
-                            <ul className="text-xs text-gray-600 space-y-1">
-                              <li>• Recent activity and contributions (4%)</li>
-                              <li>• Learning new technologies (3%)</li>
-                              <li>• Open source contributions (2%)</li>
-                              <li>• Profile completeness (1%)</li>
-                            </ul>
-                          </div>
-                        </div>
+                        )) || <p className="text-gray-500 text-sm">No README analysis available</p>}
                       </div>
                     </CardContent>
                   </Card>
+                </TabsContent>
+
+                <TabsContent value="insights" className="space-y-4">
+                  {selectedCandidate.deepAnalysis?.insights && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>AI-Generated Profile Insights</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <h5 className="font-medium">Developer Profile</h5>
+                            <div className="text-sm space-y-1">
+                              <div>
+                                <strong>Primary Language:</strong>{" "}
+                                {selectedCandidate.deepAnalysis.insights.primary_language}
+                              </div>
+                              <div>
+                                <strong>Activity Level:</strong>{" "}
+                                {selectedCandidate.deepAnalysis.insights.activity_level}
+                              </div>
+                              <div>
+                                <strong>Popularity Level:</strong>{" "}
+                                {selectedCandidate.deepAnalysis.insights.popularity_level}
+                              </div>
+                              <div>
+                                <strong>Skill Diversity:</strong>{" "}
+                                {selectedCandidate.deepAnalysis.insights.skill_diversity} skills
+                              </div>
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <h5 className="font-medium">Top Skills Detected</h5>
+                            <div className="flex flex-wrap gap-1">
+                              {selectedCandidate.deepAnalysis.insights.top_skills
+                                .slice(0, 10)
+                                .map(([skill, count]: [string, number]) => (
+                                  <Badge key={skill} variant="secondary" className="text-xs">
+                                    {skill} ({count})
+                                  </Badge>
+                                ))}
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {selectedCandidate.readmeAnalysis && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>README Quality Analysis</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-4">
+                          <div className="text-center p-4 bg-green-50 rounded-lg">
+                            <div className="text-2xl font-bold text-green-600">
+                              {selectedCandidate.readmeAnalysis.overall_readme_score}/100
+                            </div>
+                            <div className="text-sm text-green-800">Overall README Quality</div>
+                          </div>
+
+                          <div>
+                            <h5 className="font-medium mb-2">AI Assessment</h5>
+                            <p className="text-sm text-gray-600 mb-3">
+                              {selectedCandidate.readmeAnalysis.overall_insights.assessment}
+                            </p>
+
+                            <h6 className="font-medium mb-2">Recommendations:</h6>
+                            <ul className="text-sm text-gray-600 space-y-1">
+                              {selectedCandidate.readmeAnalysis.overall_insights.recommendations.map(
+                                (rec: string, index: number) => (
+                                  <li key={index}>• {rec}</li>
+                                ),
+                              )}
+                            </ul>
+                          </div>
+
+                          <div>
+                            <h5 className="font-medium mb-2">Top Repository READMEs</h5>
+                            <div className="space-y-2">
+                              {selectedCandidate.readmeAnalysis.readme_analyses
+                                .filter((analysis: any) => analysis.readme_score > 0)
+                                .slice(0, 5)
+                                .map((analysis: any, index: number) => (
+                                  <div key={index} className="border rounded p-3">
+                                    <div className="flex justify-between items-center mb-2">
+                                      <span className="font-medium">{analysis.repo_name}</span>
+                                      <Badge variant={analysis.readme_score >= 70 ? "default" : "secondary"}>
+                                        {analysis.readme_score}/100
+                                      </Badge>
+                                    </div>
+                                    <p className="text-xs text-gray-600">{analysis.feedback}</p>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {selectedCandidate.activityData && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle>Activity & Growth Analysis</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <h5 className="font-medium mb-2">Activity Breakdown</h5>
+                              <div className="space-y-2">
+                                <div className="flex justify-between text-sm">
+                                  <span>Commit Frequency:</span>
+                                  <span>{selectedCandidate.activityData.breakdown.commit_frequency}/100</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                  <span>Recent Activity:</span>
+                                  <span>{selectedCandidate.activityData.breakdown.recent_activity}/100</span>
+                                </div>
+                                <div className="flex justify-between text-sm">
+                                  <span>Consistency:</span>
+                                  <span>{selectedCandidate.activityData.breakdown.consistency}/100</span>
+                                </div>
+                              </div>
+                            </div>
+                            <div>
+                              <h5 className="font-medium mb-2">Activity Details</h5>
+                              <div className="space-y-1 text-sm">
+                                <div>Total Repos: {selectedCandidate.activityData.details.total_repos}</div>
+                                <div>Active Repos: {selectedCandidate.activityData.details.active_repos}</div>
+                                <div>Recent Commits: {selectedCandidate.activityData.details.recent_commits}</div>
+                                <div>
+                                  Account Age: {selectedCandidate.activityData.details.account_age_months} months
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
                 </TabsContent>
               </Tabs>
             </div>
