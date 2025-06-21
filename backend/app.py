@@ -1,10 +1,10 @@
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from pymongo import MongoClient
 from bson.objectid import ObjectId
 from dotenv import load_dotenv
 from flask_cors import CORS
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import requests
 import time
 from collections import defaultdict, Counter
@@ -14,12 +14,18 @@ import google.generativeai as genai
 import gridfs
 import io
 import binascii
+import json
+
 load_dotenv()
 
 app = Flask(__name__)
-CORS(app)
-
-
+CORS(app, 
+     origins=["http://localhost:3000/", "http://127.0.0.1:3000/"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+     allow_headers=["Content-Type", "Authorization", "Accept"],
+     supports_credentials=True,
+     expose_headers=["*"]
+)
 
 # Create MongoDB connection
 mongo_uri = os.getenv("MONGODB_URI")
@@ -27,20 +33,14 @@ if not mongo_uri:
     raise Exception("MONGODB_URI environment variable not set")
 
 client = MongoClient(mongo_uri)
-
-
 db = client.get_database("git-hired")
 candidates_collection = db.get_collection("candidates")
 fs = gridfs.GridFS(db)
-#--------------------------------- API Routes ---------------------------------
-if __name__ == "__main__":
-    app.run(debug=True, port=5001)  
-   
-
 
 # Configure Gemini API
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-genai.configure(api_key=GEMINI_API_KEY)
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)  # type: ignore
 
 
 GITHUB_API_URL = "https://api.github.com"
@@ -51,124 +51,6 @@ TOPIC_HEADER = {
     "Accept": "application/vnd.github.mercy-preview+json"
 }
 
-
-@app.get("/email/<string:username>")
-def getEmail(username):
-    try:
-        repos_url = f"https://api.github.com/users/{username}/repos"
-        repos = requests.get(repos_url, headers=HEADERS).json()
-
-        if isinstance(repos, dict) and repos.get('message'):
-            return None
-
-        if not repos:
-            return None
-        repo_name = repos[0]['name']
-        commits_url = f"https://api.github.com/repos/{username}/{repo_name}/commits"
-        commits = requests.get(commits_url, headers=HEADERS).json()
-
-        for commit in commits:
-            email= commit['commit']['author']['email']
-            if email:
-                return {"email":email}
-            
-    except Exception as e:
-        return {"message":e}
-@app.post("/find-matching-users")
-def find_matching_users():
-    data = request.get_json()
-    required_skills = [skill.lower() for skill in data.get("required_skills", [])]
-    languages = data.get("languages", [])
-    min_followers = data.get("min_followers", 0)
-    min_stars = data.get("min_stars", 0)
-
-    matched_usernames = set()
-
-    for lang in languages:
-        skill_query = "+".join(required_skills) if required_skills else ""
-        query = f"{skill_query}+language:{lang}+stars:>={min_stars}"
-        url = f"{GITHUB_API_URL}/search/repositories?q={query}&sort=stars&order=desc&per_page=50"
-
-        try:
-            response = requests.get(url, headers=HEADERS)
-            response.raise_for_status()
-            repos = response.json().get("items", [])
-
-            for repo in repos:
-                username = repo["owner"]["login"]
-                if username in matched_usernames:
-                    continue
-
-                user_data = requests.get(repo["owner"]["url"], headers=HEADERS).json()
-                if user_data.get("type") != "User":
-                    continue
-                if user_data.get("followers", 0) < min_followers:
-                    continue
-
-                # Check skill match in name/description (case insensitive)
-                text = f"{repo.get('name', '')} {repo.get('description', '')}".lower()
-                if any(skill in text for skill in required_skills):
-                    matched_usernames.add(username)
-
-        except Exception as e:
-            print(f"Error processing {lang}: {e}")
-
-    return jsonify({"matched_username": list(matched_usernames)})
-
-@app.get("/get-info/<string:username>")
-def getInfo(username):
-    try:
-        user_url = f"{GITHUB_API_URL}/users/{username}"
-        user_resp = requests.get(user_url, headers=HEADERS).json()
-
-        if "message" in user_resp:
-            return jsonify({"error": "User not found"}), 404
-
-        repos_url = f"{user_url}/repos?per_page=100"
-        repos = requests.get(repos_url, headers=HEADERS).json()
-
-        if not isinstance(repos, list):
-            return jsonify({"error": "Failed to fetch repositories"}), 500
-
-        language_usage = {}
-        total_stars = 0
-        total_commits = 0
-        all_topics = set()
-
-        for repo in repos:
-            # Language count
-            lang = repo.get("language")
-            if lang:
-                language_usage[lang] = language_usage.get(lang, 0) + 1
-
-            # Star count
-            total_stars += repo.get("stargazers_count", 0)
-
-            # Fetch topics
-            topics_url = f"{repo['url']}/topics"
-            topics_resp = requests.get(topics_url, headers=TOPIC_HEADER).json()
-            topics = topics_resp.get("names", [])
-            all_topics.update(topics)
-
-            # Commit count per repo (limited for speed)
-            commits_url = repo["commits_url"].replace("{/sha}", "")
-            commit_resp = requests.get(commits_url, headers=HEADERS).json()
-            if isinstance(commit_resp, list):
-                total_commits += len(commit_resp)
-
-        return jsonify({
-            "username": username,
-            "followers": user_resp.get("followers", 0),
-            "public_repos": user_resp.get("public_repos", 0),
-            "top_languages": sorted(language_usage, key=language_usage.get, reverse=True),
-            "total_stars": total_stars,
-            "average_stars_per_repo": round(total_stars / len(repos), 2) if repos else 0,
-            "total_commit_samples": total_commits,
-            "inferred_skills_from_topics": list(all_topics)
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 # Enhanced skill detection patterns with more comprehensive coverage
 SKILL_PATTERNS = {
     'frontend': [
@@ -230,85 +112,6 @@ def extract_skills_from_text(text):
                 found_skills.append(keyword)
     
     # Additional pattern matching for common variations
-    import re
-    
-    # Framework patterns
-    framework_patterns = [
-        r'\b(react|vue|angular|svelte)\b',
-        r'\b(django|flask|fastapi|express)\b', 
-        r'\b(tensorflow|pytorch|keras)\b',
-        r'\b(docker|kubernetes|k8s)\b',
-        r'\b(mongodb|postgresql|mysql|redis)\b'
-    ]
-    
-    for pattern in framework_patterns:
-        matches = re.findall(pattern, text_lower, re.IGNORECASE)
-        found_skills.extend(matches)
-    
-    # Remove duplicates and return
-    return list(set(found_skills))
-SKILL_PATTERNS = {
-    'frontend': [
-        'react', 'vue', 'angular', 'svelte', 'frontend', 'front-end', 'html', 'css', 'javascript', 'typescript', 
-        'sass', 'scss', 'less', 'next.js', 'nuxt', 'gatsby', 'webpack', 'vite', 'tailwind', 'bootstrap', 
-        'material-ui', 'mui', 'chakra', 'styled-components', 'emotion', 'redux', 'mobx', 'zustand', 
-        'jquery', 'backbone', 'ember', 'knockout', 'polymer', 'lit', 'stencil', 'alpine.js'
-    ],
-    'backend': [
-        'django', 'flask', 'fastapi', 'express', 'koa', 'hapi', 'nestjs', 'spring', 'spring-boot', 
-        'backend', 'back-end', 'api', 'server', 'node.js', 'nodejs', 'laravel', 'symfony', 'codeigniter', 
-        'rails', 'ruby-on-rails', 'sinatra', 'asp.net', 'dotnet', '.net', 'core', 'mvc', 'web-api',
-        'go', 'gin', 'echo', 'fiber', 'rust', 'actix', 'rocket', 'warp', 'axum', 'php', 'slim'
-    ],
-    'mobile': [
-        'android', 'ios', 'react-native', 'flutter', 'swift', 'kotlin', 'mobile', 'xamarin', 
-        'ionic', 'cordova', 'phonegap', 'expo', 'nativescript', 'unity', 'unreal', 'java-android',
-        'objective-c', 'swiftui', 'jetpack-compose', 'flutter-dart', 'capacitor'
-    ],
-    'ml': [
-        'machine-learning', 'ml', 'tensorflow', 'pytorch', 'sklearn', 'scikit-learn', 'ai', 'artificial-intelligence',
-        'neural', 'deep-learning', 'data-science', 'pandas', 'numpy', 'matplotlib', 'seaborn', 'plotly',
-        'jupyter', 'notebook', 'keras', 'opencv', 'computer-vision', 'nlp', 'natural-language-processing',
-        'transformers', 'bert', 'gpt', 'llm', 'langchain', 'huggingface', 'xgboost', 'lightgbm', 'catboost'
-    ],
-    'devops': [
-        'docker', 'kubernetes', 'k8s', 'aws', 'amazon-web-services', 'gcp', 'google-cloud', 'azure', 
-        'microsoft-azure', 'terraform', 'ansible', 'jenkins', 'ci/cd', 'github-actions', 'gitlab-ci',
-        'circle-ci', 'travis-ci', 'helm', 'istio', 'prometheus', 'grafana', 'elk', 'elasticsearch',
-        'logstash', 'kibana', 'nginx', 'apache', 'load-balancer', 'microservices', 'serverless'
-    ],
-    'database': [
-        'mongodb', 'postgresql', 'postgres', 'mysql', 'sqlite', 'redis', 'elasticsearch', 'database', 
-        'sql', 'nosql', 'cassandra', 'dynamodb', 'firebase', 'firestore', 'supabase', 'planetscale',
-        'prisma', 'typeorm', 'sequelize', 'mongoose', 'knex', 'drizzle', 'clickhouse', 'snowflake'
-    ],
-    'testing': [
-        'jest', 'mocha', 'chai', 'cypress', 'selenium', 'playwright', 'puppeteer', 'testing', 'unit-test',
-        'integration-test', 'e2e', 'tdd', 'bdd', 'pytest', 'unittest', 'rspec', 'jasmine', 'karma'
-    ],
-    'tools': [
-        'git', 'github', 'gitlab', 'bitbucket', 'vscode', 'intellij', 'vim', 'emacs', 'sublime',
-        'postman', 'insomnia', 'figma', 'sketch', 'adobe', 'photoshop', 'illustrator'
-    ]
-}
-
-def extract_skills_from_text(text):
-    """Enhanced skill extraction with better pattern matching"""
-    if not text:
-        return []
-    
-    text_lower = text.lower()
-    found_skills = []
-    
-    # Direct keyword matching
-    for category, keywords in SKILL_PATTERNS.items():
-        for keyword in keywords:
-            if keyword in text_lower:
-                found_skills.append(keyword)
-    
-    # Additional pattern matching for common variations
-    import re
-    
     # Framework patterns
     framework_patterns = [
         r'\b(react|vue|angular|svelte)\b',
@@ -415,17 +218,149 @@ def get_commit_count_paginated(username, repo_name):
     
     return 0
 
+def make_serializable(doc):
+    if doc is None:
+        return None
+    if "_id" in doc:
+        doc["id"] = str(doc["_id"])
+        del doc["_id"]
+    if "createdAt" in doc and isinstance(doc["createdAt"], datetime):
+        doc["createdAt"] = doc["createdAt"].isoformat()
+    # Recursively check for nested objects
+    for key, value in doc.items():
+        if isinstance(value, list):
+            doc[key] = [make_serializable(v) if isinstance(v, dict) else v for v in value]
+        elif isinstance(value, dict):
+            doc[key] = make_serializable(value)
+    return doc
+
+#--------------------------------- API Routes ---------------------------------
+@app.get("/email/<string:username>")
+def getEmail(username):
+    try:
+        repos_url = f"https://api.github.com/users/{username}/repos"
+        repos = requests.get(repos_url, headers=HEADERS).json()
+
+        if isinstance(repos, dict) and repos.get('message'):
+            return jsonify({"email": None}), 404
+
+        if not repos:
+            return jsonify({"email": None}), 404
+
+        repo_name = repos[0]['name']
+        commits_url = f"https://api.github.com/repos/{username}/{repo_name}/commits"
+        commits = requests.get(commits_url, headers=HEADERS).json()
+
+        for commit in commits:
+            email= commit['commit']['author']['email']
+            if email:
+                return jsonify({"email":email})
+        
+        return jsonify({"email": None}), 404
+            
+    except Exception as e:
+        return jsonify({"message": str(e)}), 500
+
+@app.post("/find-matching-users")
+def find_matching_users():
+    data = request.get_json()
+    required_skills = [skill.lower() for skill in data.get("required_skills", [])]
+    languages = data.get("languages", [])
+    min_followers = data.get("min_followers", 0)
+    min_stars = data.get("min_stars", 0)
+
+    matched_usernames = set()
+
+    for lang in languages:
+        skill_query = "+".join(required_skills) if required_skills else ""
+        query = f"{skill_query}+language:{lang}+stars:>={min_stars}"
+        url = f"{GITHUB_API_URL}/search/repositories?q={query}&sort=stars&order=desc&per_page=50"
+
+        try:
+            response = requests.get(url, headers=HEADERS)
+            response.raise_for_status()
+            repos = response.json().get("items", [])
+
+            for repo in repos:
+                username = repo["owner"]["login"]
+                if username in matched_usernames:
+                    continue
+
+                user_data = requests.get(repo["owner"]["url"], headers=HEADERS).json()
+                if user_data.get("type") != "User":
+                    continue
+                if user_data.get("followers", 0) < min_followers:
+                    continue
+
+                # Check skill match in name/description (case insensitive)
+                text = f"{repo.get('name', '')} {repo.get('description', '')}".lower()
+                if any(skill in text for skill in required_skills):
+                    matched_usernames.add(username)
+
+        except Exception as e:
+            print(f"Error processing {lang}: {e}")
+
+    return jsonify({"matched_username": list(matched_usernames)})
+
+@app.get("/get-info/<string:username>")
+def getInfo(username):
+    try:
+        user_url = f"{GITHUB_API_URL}/users/{username}"
+        user_resp = requests.get(user_url, headers=HEADERS).json()
+
+        if "message" in user_resp:
+            return jsonify({"error": "User not found"}), 404
+
+        repos_url = f"{user_url}/repos?per_page=100"
+        repos = requests.get(repos_url, headers=HEADERS).json()
+
+        if not isinstance(repos, list):
+            return jsonify({"error": "Failed to fetch repositories"}), 500
+
+        language_usage = {}
+        total_stars = 0
+        total_commits = 0
+        all_topics = set()
+
+        for repo in repos:
+            # Language count
+            lang = repo.get("language")
+            if lang:
+                language_usage[lang] = language_usage.get(lang, 0) + 1
+
+            # Star count
+            total_stars += repo.get("stargazers_count", 0)
+
+            # Fetch topics
+            topics_url = f"{repo['url']}/topics"
+            topics_resp = requests.get(topics_url, headers=TOPIC_HEADER).json()
+            topics = topics_resp.get("names", [])
+            all_topics.update(topics)
+
+            # Commit count per repo (limited for speed)
+            commits_url = repo["commits_url"].replace("{/sha}", "")
+            commit_resp = requests.get(commits_url, headers=HEADERS).json()
+            if isinstance(commit_resp, list):
+                total_commits += len(commit_resp)
+
+        return jsonify({
+            "username": username,
+            "followers": user_resp.get("followers", 0),
+            "public_repos": user_resp.get("public_repos", 0),
+            "top_languages": sorted(language_usage.keys(), key=lambda k: language_usage[k], reverse=True),
+            "total_stars": total_stars,
+            "average_stars_per_repo": round(total_stars / len(repos), 2) if repos else 0,
+            "total_commit_samples": total_commits,
+            "inferred_skills_from_topics": list(all_topics)
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.get("/deep-search/<string:username>")
 def deep_search(username):
     """
     Deep GitHub profile analysis with comprehensive metrics
-    
-    Returns:
-    - Language & repo distribution (for pie charts)
-    - Commit & activity metrics
-    - Popularity and reach metrics
-    - Skill inference from topics, READMEs, descriptions
-    - Social & community contribution indicators
     """
     try:
         print(f"Starting deep analysis for {username}")
@@ -460,14 +395,13 @@ def deep_search(username):
                 break
                 
             page += 1
-            time.sleep(0.1)  # Rate limiting
+            time.sleep(0.1)
         
         if not all_repos:
             return jsonify({"error": "No repositories found"}), 404
         
         print(f"Found {len(all_repos)} repositories")
         
-        # Initialize analysis containers
         analysis = {
             "user_info": {
                 "username": username,
@@ -512,7 +446,6 @@ def deep_search(username):
             }
         }
         
-        # Process repositories
         for i, repo in enumerate(all_repos):
             if i % 20 == 0:
                 print(f"Processing repo {i+1}/{len(all_repos)}")
@@ -526,12 +459,10 @@ def deep_search(username):
             updated_at = repo.get("updated_at")
             repo_url = repo.get("html_url", "")
             
-            # Language distribution
             if language:
                 analysis["language_distribution"][language] += 1
                 analysis["stars_per_language"][language] += stars
                 
-                # Track top repo per language
                 if stars > analysis["top_repo_per_language"][language]["stars"]:
                     analysis["top_repo_per_language"][language] = {
                         "name": repo_name,
@@ -539,7 +470,6 @@ def deep_search(username):
                         "url": repo_url
                     }
             
-            # Get topics
             topics = []
             try:
                 topics_url = f"{repo['url']}/topics"
@@ -547,11 +477,10 @@ def deep_search(username):
                 if topics_resp.status_code == 200:
                     topics = topics_resp.json().get("names", [])
                     analysis["skills_analysis"]["topics_used"].update(topics)
-                time.sleep(0.05)  # Rate limiting
+                time.sleep(0.05)
             except:
                 pass
             
-            # Get commit count (for starred repos or first 30)
             commits = 0
             if stars > 0 or i < 30:
                 commits = get_commit_count_paginated(username, repo_name)
@@ -560,20 +489,17 @@ def deep_search(username):
                 if language and commits > 0:
                     analysis["commits_per_language"][language] += commits
                     
-                time.sleep(0.1)  # Rate limiting for commit API
+                time.sleep(0.1)
             
-            # Activity tracking
             if updated_at:
                 repo_date = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
                 if not analysis["activity_metrics"]["last_activity_date"] or repo_date > analysis["activity_metrics"]["last_activity_date"]:
                     analysis["activity_metrics"]["last_activity_date"] = updated_at
                 
-                # Check if repo was updated in last 6 months
-                six_months_ago = datetime.now().replace(tzinfo=repo_date.tzinfo) - timedelta(days=180)
+                six_months_ago = datetime.now(timezone.utc) - timedelta(days=180)
                 if repo_date > six_months_ago:
                     analysis["activity_metrics"]["repos_with_recent_activity"] += 1
             
-            # Popularity metrics
             analysis["popularity_metrics"]["total_stars"] += stars
             analysis["popularity_metrics"]["total_forks"] += forks
             analysis["popularity_metrics"]["total_watchers"] += watchers
@@ -589,15 +515,12 @@ def deep_search(username):
                     "url": repo_url
                 }
             
-            # Get README for ALL repos (comprehensive analysis)
             readme_content = get_repo_readme(username, repo_name)
-            time.sleep(0.1)  # Rate limiting
+            time.sleep(0.1)
             
-            # Enhanced skills analysis from multiple sources
             repo_skills = extract_skills_from_repo_structure(repo, readme_content)
             desc_skills = extract_skills_from_text(description)
             
-            # Update skill counters
             analysis["skills_analysis"]["description_keywords"].update(desc_skills)
             analysis["skills_analysis"]["all_inferred_skills"].update(repo_skills)
             
@@ -606,17 +529,12 @@ def deep_search(username):
                 analysis["skills_analysis"]["readme_keywords"].update(readme_skills)
                 analysis["skills_analysis"]["all_inferred_skills"].update(readme_skills)
             
-            # Enhanced skill categorization
             all_text = f"{description} {readme_content} {' '.join(topics)}"
             for category, keywords in SKILL_PATTERNS.items():
-                category_count = 0
-                for keyword in keywords:
-                    if keyword in all_text.lower():
-                        category_count += 1
+                category_count = sum(1 for keyword in keywords if keyword in all_text.lower())
                 if category_count > 0:
                     analysis["skills_analysis"]["skill_categories"][category] += category_count
             
-            # Store comprehensive repo details with enhanced skill analysis
             individual_repo_skills = extract_skills_from_repo_structure(repo, readme_content)
             analysis["repo_details"].append({
                 "name": repo_name,
@@ -624,50 +542,40 @@ def deep_search(username):
                 "stars": stars,
                 "forks": forks,
                 "watchers": watchers,
-                "description": description,  # Full description (not truncated)
-                "readme_content": readme_content,  # Full README content
-                "readme_summary": readme_content[:500] + "..." if len(readme_content) > 500 else readme_content,  # First 500 chars for preview
+                "description": description,
+                "readme_content": readme_content,
+                "readme_summary": readme_content[:500] + "..." if len(readme_content) > 500 else readme_content,
                 "topics": topics,
                 "commits": commits,
                 "updated_at": updated_at,
                 "url": repo_url,
                 "has_readme": bool(readme_content),
-                "detected_skills": individual_repo_skills,  # Skills specific to this repo
+                "detected_skills": individual_repo_skills,
                 "skill_categories": {
-                    category: len([skill for skill in individual_repo_skills 
-                                 if skill in SKILL_PATTERNS.get(category, [])])
+                    category: len([skill for skill in individual_repo_skills if skill in SKILL_PATTERNS.get(category, [])])
                     for category in SKILL_PATTERNS.keys()
                 },
                 "readme_length": len(readme_content) if readme_content else 0
             })
         
-        # Calculate derived metrics
         total_repos = len(all_repos)
         active_repos = len([r for r in analysis["repo_details"] if r["commits"] > 0])
         
         analysis["activity_metrics"]["active_repos_count"] = active_repos
-        analysis["activity_metrics"]["avg_commits_per_repo"] = round(
-            analysis["activity_metrics"]["total_commits"] / max(total_repos, 1), 2
-        )
-        
-        analysis["popularity_metrics"]["avg_stars_per_repo"] = round(
-            analysis["popularity_metrics"]["total_stars"] / max(total_repos, 1), 2
-        )
+        analysis["activity_metrics"]["avg_commits_per_repo"] = round(analysis["activity_metrics"]["total_commits"] / max(total_repos, 1), 2)
+        analysis["popularity_metrics"]["avg_stars_per_repo"] = round(analysis["popularity_metrics"]["total_stars"] / max(total_repos, 1), 2)
         
         # Convert collections to regular dicts for JSON serialization
-        analysis["language_distribution"] = dict(analysis["language_distribution"])
-        analysis["stars_per_language"] = dict(analysis["stars_per_language"])
-        analysis["commits_per_language"] = dict(analysis["commits_per_language"])
-        analysis["top_repo_per_language"] = dict(analysis["top_repo_per_language"])
-        analysis["skills_analysis"]["topics_used"] = dict(analysis["skills_analysis"]["topics_used"])
-        analysis["skills_analysis"]["readme_keywords"] = dict(analysis["skills_analysis"]["readme_keywords"])
-        analysis["skills_analysis"]["description_keywords"] = dict(analysis["skills_analysis"]["description_keywords"])
-        analysis["skills_analysis"]["all_inferred_skills"] = dict(analysis["skills_analysis"]["all_inferred_skills"])
-        analysis["skills_analysis"]["skill_categories"] = dict(analysis["skills_analysis"]["skill_categories"])
-        
-        # Generate insights
-        primary_language = max(analysis["language_distribution"], key=analysis["language_distribution"].get) if analysis["language_distribution"] else "Unknown"
-        most_starred_language = max(analysis["stars_per_language"], key=analysis["stars_per_language"].get) if analysis["stars_per_language"] else "Unknown"
+        for key in list(analysis.keys()):
+            if isinstance(analysis[key], defaultdict):
+                analysis[key] = dict(analysis[key])
+            elif isinstance(analysis[key], dict):
+                for sub_key in list(analysis[key].keys()):
+                    if isinstance(analysis[key][sub_key], (Counter, defaultdict)):
+                        analysis[key][sub_key] = dict(analysis[key][sub_key])
+
+        primary_language = max(analysis["language_distribution"].items(), key=lambda item: item[1])[0] if analysis["language_distribution"] else "Unknown"
+        most_starred_language = max(analysis["stars_per_language"].items(), key=lambda item: item[1])[0] if analysis["stars_per_language"] else "Unknown"
         
         total_commits = analysis["activity_metrics"]["total_commits"]
         total_stars = analysis["popularity_metrics"]["total_stars"]
@@ -684,7 +592,6 @@ def deep_search(username):
             "contribution_consistency": "High" if analysis["activity_metrics"]["repos_with_recent_activity"] > total_repos * 0.3 else "Medium" if analysis["activity_metrics"]["repos_with_recent_activity"] > total_repos * 0.1 else "Low"
         }
         
-        # Add metadata
         analysis["metadata"] = {
             "analysis_timestamp": datetime.utcnow().isoformat(),
             "total_repos_analyzed": total_repos,
@@ -705,7 +612,6 @@ def deep_search(username):
 def deep_search_summary(username):
     """Quick summary version of deep search for faster responses"""
     try:
-        # Get basic user info
         user_url = f"{GITHUB_API_URL}/users/{username}"
         user_resp = requests.get(user_url, headers=HEADERS)
         
@@ -714,11 +620,9 @@ def deep_search_summary(username):
             
         user_data = user_resp.json()
         
-        # Get limited repos (first 50)
         repos_url = f"{user_url}/repos?per_page=50&sort=updated"
         repos_resp = requests.get(repos_url, headers=HEADERS)
         
-        # Better error handling for repos
         repos = []
         if repos_resp.status_code == 200:
             repos_data = repos_resp.json()
@@ -734,13 +638,11 @@ def deep_search_summary(username):
         if not repos:
             return jsonify({"error": "No repositories found"}), 404
         
-        # Quick analysis with enhanced skills and README for each repo
         languages = Counter()
         total_stars = 0
         all_skills = Counter()
         
-        for repo in repos[:30]:  # Limit processing
-            # Ensure repo is a dict
+        for repo in repos[:30]:
             if not isinstance(repo, dict):
                 continue
                 
@@ -749,51 +651,45 @@ def deep_search_summary(username):
             
             total_stars += repo.get("stargazers_count", 0)
             
-            # Get README content for better skill detection
             readme_content = get_repo_readme(username, repo.get("name", ""))
-            time.sleep(0.05)  # Rate limiting
+            time.sleep(0.05)
             
-            # Enhanced skill detection for summary (now with README)
             repo_skills = extract_skills_from_repo_structure(repo, readme_content)
             all_skills.update(repo_skills)
         
-        # Build enhanced top repos list with skills and README
         top_repos = []
         try:
             sorted_repos = sorted(repos, key=lambda x: x.get("stargazers_count", 0) if isinstance(x, dict) else 0, reverse=True)
             for repo in sorted_repos[:5]:
                 if isinstance(repo, dict):
-                    # Get README for each top repo
                     readme_content = get_repo_readme(username, repo.get("name", ""))
                     repo_skills = extract_skills_from_repo_structure(repo, readme_content)
-                    time.sleep(0.05)  # Rate limiting
+                    time.sleep(0.05)
                     
                     top_repos.append({
                         "name": repo.get("name", "Unknown"),
                         "stars": repo.get("stargazers_count", 0),
                         "language": repo.get("language"),
                         "description": repo.get("description", "") or "",
-                        "readme_content": readme_content,  # Full README content
+                        "readme_content": readme_content,
                         "readme_length": len(readme_content) if readme_content else 0,
                         "has_readme": bool(readme_content),
-                        "detected_skills": repo_skills[:10]  # Top 10 skills for this repo
+                        "detected_skills": repo_skills[:10]
                     })
         except Exception as sort_error:
             print(f"Error sorting repos: {sort_error}")
-            # Fallback: just take first 5 repos
             for repo in repos[:5]:
                 if isinstance(repo, dict):
-                    # Get README for each fallback repo
                     readme_content = get_repo_readme(username, repo.get("name", ""))
                     repo_skills = extract_skills_from_repo_structure(repo, readme_content)
-                    time.sleep(0.05)  # Rate limiting
+                    time.sleep(0.05)
                     
                     top_repos.append({
                         "name": repo.get("name", "Unknown"),
                         "stars": repo.get("stargazers_count", 0),
                         "language": repo.get("language"),
                         "description": repo.get("description", "") or "",
-                        "readme_content": readme_content,  # Full README content
+                        "readme_content": readme_content,
                         "readme_length": len(readme_content) if readme_content else 0,
                         "has_readme": bool(readme_content),
                         "detected_skills": repo_skills[:10]
@@ -810,10 +706,9 @@ def deep_search_summary(username):
             "top_languages": dict(languages.most_common(5)),
             "total_stars": total_stars,
             "avg_stars": round(total_stars / max(len(repos), 1), 2),
-            "detected_skills": dict(all_skills.most_common(15)),  # Top 15 detected skills
+            "detected_skills": dict(all_skills.most_common(15)),
             "skill_categories": {
-                category: len([skill for skill in all_skills.keys() 
-                             if skill in SKILL_PATTERNS.get(category, [])])
+                category: len([skill for skill in all_skills.keys() if skill in SKILL_PATTERNS.get(category, [])])
                 for category in SKILL_PATTERNS.keys()
             },
             "top_repos": top_repos
@@ -840,7 +735,6 @@ def match_single_candidate(username):
         if not candidate_data:
             return jsonify({"error": "No candidate data provided"}), 400
         
-        # Extract additional skills from job description
         job_skills_from_desc = extract_skills_from_text(job_description)
         all_job_skills = list(set(required_skills + nice_to_have + job_skills_from_desc))
         
@@ -865,27 +759,21 @@ def match_single_candidate(username):
             stars = repo.get("stars", 0)
             readme_length = repo.get("readme_length", 0)
             
-            # Calculate skill match percentage
             repo_skills_lower = [skill.lower() for skill in repo_skills]
             
-            # Count required skill matches (higher weight)
             required_matches = len(set(required_skills) & set(repo_skills_lower))
             required_score = (required_matches / max(len(required_skills), 1)) * 70
             
-            # Count nice-to-have matches (bonus points)
             nice_to_have_matches = len(set(nice_to_have) & set(repo_skills_lower))
             nice_to_have_score = (nice_to_have_matches / max(len(nice_to_have), 1)) * 15
             
-            # Additional context matching from README and description
             all_text = f"{description} {readme_content}".lower()
             context_matches = sum(1 for skill in all_job_skills if skill in all_text)
             context_score = min((context_matches / max(len(all_job_skills), 1)) * 10, 10)
             
-            # Quality bonus (README length and stars)
-            readme_bonus = min(readme_length / 1000, 1) * 3  # Max 3 points
-            popularity_bonus = min(stars / 10, 1) * 2  # Max 2 points
+            readme_bonus = min(readme_length / 1000, 1) * 3
+            popularity_bonus = min(stars / 10, 1) * 2
             
-            # Calculate final repo match percentage
             repo_match_percentage = min(
                 required_score + nice_to_have_score + context_score + readme_bonus + popularity_bonus,
                 100
@@ -896,18 +784,12 @@ def match_single_candidate(username):
                 "match_percentage": round(repo_match_percentage, 0)
             })
             
-            # Weight repositories by importance (stars + README quality)
             repo_weight = max(stars, 1) * max(readme_length / 100, 1)
             weighted_scores.append(repo_match_percentage * repo_weight)
             total_weight += repo_weight
         
-        # Calculate overall candidate match percentage
-        if total_weight > 0:
-            total_match_percentage = sum(weighted_scores) / total_weight
-        else:
-            total_match_percentage = 0
+        total_match_percentage = sum(weighted_scores) / total_weight if total_weight > 0 else 0
         
-        # Sort repo matches by percentage (highest first)
         repo_matches.sort(key=lambda x: x["match_percentage"], reverse=True)
         
         return jsonify({
@@ -938,8 +820,7 @@ def match_single_candidate_ai(username):
         if not job_description:
             return jsonify({"error": "Job description is required"}), 400
         
-        # Initialize Gemini model
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-1.5-flash')  # type: ignore
         
         top_repos = candidate_data.get("top_repos", [])
         
@@ -952,14 +833,12 @@ def match_single_candidate_ai(username):
         
         repo_matches = []
         
-        # Analyze each repository with Gemini
         for repo in top_repos:
             repo_name = repo.get("name", "")
             description = repo.get("description", "")
             readme_content = repo.get("readme_content", "")
             detected_skills = repo.get("detected_skills", [])
             
-            # Create comprehensive repo context
             repo_context = f"""
 Repository: {repo_name}
 Description: {description}
@@ -967,7 +846,6 @@ README Content: {readme_content[:1500]}...
 Detected Skills: {', '.join(detected_skills)}
 """
             
-            # Create Gemini prompt for repo matching
             repo_prompt = f"""
 You are an expert technical recruiter. Analyze this GitHub repository against the job requirements and provide a match percentage (0-100).
 
@@ -996,12 +874,9 @@ Be strict but fair in scoring. Only give high scores (80+) for excellent matches
 """
             
             try:
-                # Get Gemini response
                 response = model.generate_content(repo_prompt)
                 response_text = response.text.strip()
                 
-                # Parse JSON response
-                import json
                 if response_text.startswith('```json'):
                     response_text = response_text.replace('```json', '').replace('```', '').strip()
                 
@@ -1012,11 +887,10 @@ Be strict but fair in scoring. Only give high scores (80+) for excellent matches
                     "match_percentage": int(repo_analysis.get("match_percentage", 0))
                 })
                 
-                time.sleep(0.5)  # Rate limiting
+                time.sleep(0.5)
                 
             except Exception as e:
                 print(f"Error analyzing repo {repo_name}: {str(e)}")
-                # Fallback scoring
                 fallback_score = 0
                 repo_skills_text = ' '.join(detected_skills + [description, repo_name]).lower()
                 required_matches = sum(1 for skill in required_skills if skill.lower() in repo_skills_text)
@@ -1028,7 +902,7 @@ Be strict but fair in scoring. Only give high scores (80+) for excellent matches
                     "match_percentage": fallback_score
                 })
         
-        # Calculate overall match with Gemini
+        total_match_percentage = 0
         if repo_matches:
             candidate_summary = f"""
 Candidate: {username}
@@ -1056,15 +930,8 @@ Provide ONLY an integer between 0-100.
                 total_match_percentage = int(overall_response.text.strip())
             except Exception as e:
                 print(f"Error calculating overall match: {str(e)}")
-                # Fallback: weighted average
-                if repo_matches:
-                    total_match_percentage = round(sum(r["match_percentage"] for r in repo_matches) / len(repo_matches))
-                else:
-                    total_match_percentage = 0
-        else:
-            total_match_percentage = 0
+                total_match_percentage = round(sum(r["match_percentage"] for r in repo_matches) / len(repo_matches)) if repo_matches else 0
         
-        # Sort repo matches by percentage
         repo_matches.sort(key=lambda x: x["match_percentage"], reverse=True)
         
         return jsonify({
@@ -1077,25 +944,6 @@ Provide ONLY an integer between 0-100.
         print(f"Single candidate AI matching error: {str(e)}")
         return jsonify({"error": f"AI matching failed: {str(e)}"}), 500
 
-
-def make_serializable(doc):
-    if doc is None:
-        return None
-    if "_id" in doc:
-        doc["id"] = str(doc["_id"])
-        del doc["_id"]
-    if "createdAt" in doc and isinstance(doc["createdAt"], datetime.datetime):
-        doc["createdAt"] = doc["createdAt"].isoformat()
-    # Recursively check for nested objects, which is not strictly necessary for the current structure but good practice
-    for key, value in doc.items():
-        if isinstance(value, list):
-            doc[key] = [make_serializable(v) if isinstance(v, dict) else v for v in value]
-        elif isinstance(value, dict):
-            doc[key] = make_serializable(value)
-    return doc
-
-#--------------------------------- API Routes ---------------------------------
-
 @app.route("/api/candidates", methods=["POST"])
 def create_candidate():
     try:
@@ -1103,16 +951,13 @@ def create_candidate():
         if not data:
             return jsonify({"error": "Invalid JSON"}), 400
         
-        # The resume file is expected to be a base64 string
         if "resumeFile" not in data or "data" not in data["resumeFile"]:
             return jsonify({"error": "resumeFile data is missing"}), 400
             
         resume_file_data = data.pop("resumeFile")
         
         try:
-            # Decode the base64 string to bytes
             file_bytes = base64.b64decode(resume_file_data["data"])
-            # Store the file in GridFS and get its ID
             file_id = fs.put(
                 file_bytes, 
                 filename=data.get("filename", "untitled.dat"), 
@@ -1120,15 +965,14 @@ def create_candidate():
             )
             data["resumeFileId"] = str(file_id)
             data["resumeFileType"] = resume_file_data.get("type")
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError, binascii.Error) as e:
             print(f"Base64 decode error: {e}")
             return jsonify({"error": "Invalid base64 data for resume file"}), 400
 
-        data["createdAt"] = datetime.datetime.now(datetime.timezone.utc)
+        data["createdAt"] = datetime.now(timezone.utc)
         
         result = candidates_collection.insert_one(data)
         
-        # Fetch the inserted document to ensure we have the correct data from DB
         new_candidate = candidates_collection.find_one({"_id": result.inserted_id})
         
         return jsonify(make_serializable(new_candidate)), 201
@@ -1165,7 +1009,7 @@ def get_resume_file(candidate_id):
         return send_file(
             io.BytesIO(grid_out.read()),
             mimetype=grid_out.content_type,
-            as_attachment=False, # Set to True to force download
+            as_attachment=False,
             download_name=grid_out.filename
         )
 
