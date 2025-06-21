@@ -24,7 +24,7 @@ export interface Candidate {
   id: string
   name: string
   email: string
-  githubUrl: string
+  github_username: string
   resumeText: string
   score: number
   githubAnalysis: GitHubAnalysis

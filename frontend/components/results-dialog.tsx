@@ -24,8 +24,8 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
   useEffect(() => {
     if (open) {
       const allCandidates = JSON.parse(localStorage.getItem("candidates") || "[]")
-      const jobCandidates = allCandidates.filter((c: Candidate) => c.jobId === job.id)
-      setCandidates(jobCandidates.sort((a, b) => b.score - a.score))
+      const jobCandidates: Candidate[] = allCandidates.filter((c: Candidate) => c.jobId === job.id)
+      setCandidates(jobCandidates.sort((a: Candidate, b: Candidate) => b.score - a.score))
       if (jobCandidates.length > 0) {
         setSelectedCandidate(jobCandidates[0])
       }
@@ -48,6 +48,13 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
     if (score >= 80) return <CheckCircle className="w-4 h-4 text-green-600" />
     if (score >= 60) return <AlertTriangle className="w-4 h-4 text-yellow-600" />
     return <XCircle className="w-4 h-4 text-red-600" />
+  }
+
+  const formatUrl = (url: string) => {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
+      return url
+    }
+    return `//${url}`
   }
 
   return (
@@ -88,7 +95,7 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                     <CardContent className="pt-0">
                       <div className="flex items-center gap-2 text-xs text-gray-600 mb-2">
                         <Github className="w-3 h-3" />
-                        <span className="truncate">{candidate.githubUrl}</span>
+                        <span className="truncate">{candidate.github_username}</span>
                       </div>
                       <div className="flex items-center gap-2 text-xs text-gray-600 mb-2">
                         {getCodeQualityIcon(candidate.githubAnalysis.codeQualityScore || 0)}
@@ -132,7 +139,7 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                         <div>
                           <h4 className="font-medium mb-2">GitHub Profile</h4>
                           <a
-                            href={selectedCandidate.githubUrl}
+                            href={`https://github.com/${selectedCandidate.github_username}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-blue-600 hover:underline flex items-center gap-1"
@@ -227,7 +234,7 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                           <div key={index} className="flex items-center gap-2">
                             <Badge variant="outline">{link.type}</Badge>
                             <a
-                              href={link.url}
+                              href={formatUrl(link.url)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-blue-600 hover:underline text-sm"
