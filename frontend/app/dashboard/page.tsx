@@ -17,7 +17,7 @@ export interface JobPosting {
   requiredSkills: string[]
   createdAt: Date
   candidateCount: number
-  status: "active" | "processing" | "completed"
+  status: "active" | "draft" | "completed" | undefined
 }
 
 export interface Candidate {
@@ -166,7 +166,7 @@ export default function Dashboard() {
                   <div className="flex items-center gap-2">
                     <Badge
                       variant={
-                        job.status === "active" ? "default" : job.status === "processing" ? "secondary" : "outline"
+                        job.status === "active" ? "default" : job.status === "draft" ? "secondary" : "outline"
                       }
                     >
                       {job.status}
