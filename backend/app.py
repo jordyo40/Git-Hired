@@ -1537,6 +1537,99 @@ RESPONSE FORMAT (JSON only):
                 "Include project descriptions and purposes"
             ]
         }
+@app.get("/code-proficiency/<string:username>")
+def get_code_proficiency(username):
+    """
+    Calculates the average code proficiency score for a GitHub user
+    using Lizard, HTML, and CSS analysis from the analyzer module.
+    """
+    try:
+        from analyzer import analyze_repo_githired
+        from github import Github
+        from statistics import mean
 
+        # Use your GitHub token from the environment
+        token = os.getenv("GITHUB_TOKEN")
+        g = Github(token) if token else Github()
+        user = g.get_user(username)
+        repos = user.get_repos()
+
+        repo_scores = []
+        detailed_results = []
+        count = 0
+
+        for repo in repos:
+            if repo.fork:
+                continue
+            try:
+                print(f"🔍 Analyzing {repo.name}...")
+                score = analyze_repo_githired(username, repo.name, token=token)
+                repo_scores.append(score["overall_score"])
+                detailed_results.append({
+                    "repo": repo.name,
+                    "score": round(score["overall_score"], 2),
+                    "avg_lizard_score": score.get("avg_lizard_score", 0),
+                    "avg_html_score": score.get("avg_html_score", 0),
+                    "avg_css_score": score.get("avg_css_score", 0),
+                    "structure_bonus": score.get("structure_bonus", 0),
+                    "file_count": score.get("file_count", 0),
+                    "weights_used": score.get("weights_used", {})
+                })
+                count += 1
+                if count >= 15:  # Limit to 15 repos for performance
+                    break
+            except Exception as e:
+                print(f"❌ Failed to analyze {repo.name}: {e}")
+
+        # Calculate overall proficiency level
+        average_score = round(mean(repo_scores), 2) if repo_scores else 0
+        
+        def get_proficiency_level(score):
+            if score >= 85:
+                return "Expert"
+            elif score >= 70:
+                return "Advanced"
+            elif score >= 55:
+                return "Intermediate"
+            elif score >= 40:
+                return "Beginner"
+            else:
+                return "Novice"
+
+        return jsonify({
+            "username": username,
+            "average_score": average_score,
+            "proficiency_level": get_proficiency_level(average_score),
+            "total_repos_analyzed": count,
+            "repo_scores": detailed_results,
+            "analysis_summary": {
+                "highest_scoring_repo": max(detailed_results, key=lambda x: x["score"]) if detailed_results else None,
+                "lowest_scoring_repo": min(detailed_results, key=lambda x: x["score"]) if detailed_results else None,
+                "avg_file_count": round(mean([r["file_count"] for r in detailed_results]), 1) if detailed_results else 0
+            }
+        })
+
+    except Exception as e:
+        print(f"Error during code proficiency analysis: {str(e)}")
+        return jsonify({"error": f"Failed to analyze proficiency: {str(e)}"}), 500
+
+
+@app.get("/code-quality/<string:username>")
+def get_code_quality(username):
+    """
+    Fast code quality analysis using sampling approach
+    """
+    try:
+        from analyzer import analyze_user_code_quality
+        from github import Github
+        
+        token = os.getenv("GITHUB_TOKEN")
+        g = Github(token) if token else Github()
+        result = analyze_user_code_quality(username, g)
+        return jsonify(result)
+    except Exception as e:
+        print(f"Error during code quality analysis: {str(e)}")
+        return jsonify({"error": f"Failed to analyze code quality: {str(e)}"}), 500
+    
 if __name__ == "__main__":
     app.run(debug=True, port=5001) 
