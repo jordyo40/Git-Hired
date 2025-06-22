@@ -844,7 +844,6 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                                     </div>
                                     <div className="flex flex-col gap-1">
                                       <Badge variant="outline">Relevance: {repo.relevanceScore}/100</Badge>
-                                      <Badge variant="outline">Quality: {Math.round(repo.codeQualityScore)}/100</Badge>
                                     </div>
                                   </div>
 
@@ -1149,11 +1148,6 @@ export function ResultsDialog({ job, open, onOpenChange }: ResultsDialogProps) {
                                 >
                                   {skill} {isMatched && "✓"}
                                 </Badge>
-                                {isMatched && (
-                                  <span className="text-xs text-gray-600">
-                                    ({Math.round(proficiency as number)}/100)
-                                  </span>
-                                )}
                               </div>
                             )
                           })}
