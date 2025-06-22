@@ -123,8 +123,7 @@ export default function LandingPage() {
             {/* Subtitle */}
             <div className="animate-fade-in-up animation-delay-400">
               <p className="text-xl md:text-2xl text-gray-800 font-semibold max-w-3xl mx-auto leading-relaxed">
-                AI-powered recruitment platform that analyzes GitHub profiles to find the perfect developer match for
-                your team
+                Turn your commits into careers.
               </p>
             </div>
 
@@ -156,7 +155,7 @@ export default function LandingPage() {
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-6">
-              Why Choose <span className="text-green-600">GitHired</span>?
+              Why Choose <span className="text-green-600">GitHire</span>?
             </h2>
             <p className="text-xl text-gray-600 max-w-3xl mx-auto">
               Our platform combines cutting-edge AI with deep GitHub analysis to revolutionize technical recruitment
@@ -197,7 +196,7 @@ export default function LandingPage() {
           <div className="flex flex-col md:flex-row justify-between items-center">
             <div className="flex items-center gap-2 mb-4 md:mb-0">
               <Github className="w-8 h-8" />
-              <span className="text-2xl font-bold">GitHired</span>
+              <span className="text-2xl font-bold">GitHire</span>
             </div>
             <div className="flex gap-6 text-gray-600">
               <a href="#" className="hover:text-black transition-colors">
@@ -212,7 +211,7 @@ export default function LandingPage() {
             </div>
           </div>
           <div className="border-t border-gray-200 mt-8 pt-8 text-center text-gray-600">
-            <p>&copy; 2024 GitHired. All rights reserved. Built with ❤️ for developers.</p>
+            <p>&copy; 2024 GitHire. All rights reserved. Built with ❤️ for developers.</p>
           </div>
         </div>
       </footer>
