@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Github, Star, GitCommit, AlertTriangle, CheckCircle, XCircle } from "lucide-react"
-import type { JobPosting, Candidate, ExtractedLink, Repository, ReadmeComparison } from "@/app/page"
+import type { JobPosting, Candidate, ExtractedLink, Repository, ReadmeComparison } from "@/app/dashboard/page"
 
 interface ResultsDialogProps {
   job: JobPosting
