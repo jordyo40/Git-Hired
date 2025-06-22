@@ -58,18 +58,20 @@ export function JobPostingForm({ onSubmit }: JobPostingFormProps) {
 
       <div>
         <Label htmlFor="job-description">Job Description</Label>
-        <Textarea
-          id="job-description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="Describe the role, responsibilities, and requirements..."
-          rows={6}
-          required
-        />
+        <div className="h-32 border border-input rounded-md">
+          <Textarea
+            id="job-description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="Describe the role, responsibilities, and requirements..."
+            className="h-full w-full resize-none overflow-y-auto border-0 focus-visible:ring-0 focus-visible:ring-offset-0"
+            required
+          />
+        </div>
       </div>
 
-      <div>
-        <Label htmlFor="skills">Required Skills</Label>
+        <div>
+          <Label htmlFor="skills">Required Skills</Label>
         <div className="flex gap-2 mb-2">
           <Input
             id="skills"

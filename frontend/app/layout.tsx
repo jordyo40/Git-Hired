@@ -1,13 +1,11 @@
 import type React from "react"
 import type { Metadata } from "next"
 import "../styles/globals.css"
-import Image from "next/image"
-import Link from "next/link"
+import ClientLayout from "./ClientLayout"
 
 export const metadata: Metadata = {
-  title: "Recruitment Analyzer",
-  description: "AI-powered GitHub profile analysis for recruitment",
-  generator: "v0.dev",
+  title: "GitHired",
+  description: "Find your dream tech job.",
 }
 
 export default function RootLayout({
@@ -18,23 +16,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        {/* Header with logo */}
-        <header className="bg-white shadow p-4">
-          <div className="max-w-7xl mx-auto flex items-center">
-            <Link href="/">
-              <Image
-                src="/githire-logo.png"
-                alt="GitHired Logo"
-                width={250}
-                height={70}
-                className="cursor-pointer"
-              />
-            </Link>
-          </div>
-        </header>
-
-        {/* Main content */}
-        <main>{children}</main>
+        <ClientLayout>{children}</ClientLayout>
       </body>
     </html>
   )

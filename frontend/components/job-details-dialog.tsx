@@ -1,16 +1,13 @@
 "use client"
 
 import { useState } from "react"
-import dynamic from "next/dynamic"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Eye, Upload, Users } from "lucide-react"
-import type { JobPosting } from "@/app/dashboard/page"
-// import { ResumeUpload } from "@/components/resume-upload"
-
-const ResumeUpload = dynamic(() => import("@/components/resume-upload").then(mod => mod.ResumeUpload), { ssr: false })
+import type { JobPosting } from "@/app/page"
+import { ResumeUpload } from "@/components/resume-upload"
 
 interface JobDetailsDialogProps {
   job: JobPosting
@@ -37,7 +34,9 @@ export function JobDetailsDialog({ job, onJobUpdate, onViewResults }: JobDetails
           <div className="space-y-4">
             <div>
               <h4 className="font-medium mb-2">Description</h4>
-              <p className="text-gray-600 text-sm leading-relaxed">{job.description}</p>
+              <div className="max-h-32 overflow-y-auto">
+                <p className="text-gray-600 text-sm leading-relaxed">{job.description}</p>
+              </div>
             </div>
 
             <Separator />

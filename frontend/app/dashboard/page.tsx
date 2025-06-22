@@ -1,18 +1,14 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import dynamic from "next/dynamic"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Plus, Users, FileText, Trash2 } from "lucide-react"
 import { JobPostingForm } from "@/components/job-posting-form"
+import { JobDetailsDialog } from "@/components/job-details-dialog"
 import { ResultsDialog } from "@/components/results-dialog"
-
-const JobDetailsDialog = dynamic(() => import("@/components/job-details-dialog").then(mod => mod.JobDetailsDialog), {
-  ssr: false,
-})
 
 export interface JobPosting {
   id: string
@@ -28,14 +24,12 @@ export interface Candidate {
   id: string
   name: string
   email: string
-  github_username: string
+  githubUrl: string
   resumeText: string
   score: number
   githubAnalysis: GitHubAnalysis
   jobId: string
   extractedLinks?: ExtractedLink[]
-  resumeFileId?: string
-  resumeFileType?: string
 }
 
 export interface ExtractedLink {
@@ -89,6 +83,7 @@ export default function Dashboard() {
   const [showJobForm, setShowJobForm] = useState(false)
   const [showResults, setShowResults] = useState(false)
   const [deleteJobId, setDeleteJobId] = useState<string | null>(null)
+
   useEffect(() => {
     // Load job postings from localStorage
     const saved = localStorage.getItem("jobPostings")
@@ -115,6 +110,12 @@ export default function Dashboard() {
     setShowJobForm(false)
   }
 
+  const handleJobUpdate = (updatedJob: JobPosting) => {
+    const updated = jobPostings.map((job) => (job.id === updatedJob.id ? updatedJob : job))
+    setJobPostings(updated)
+    localStorage.setItem("jobPostings", JSON.stringify(updated))
+  }
+
   const handleDeleteJob = (jobId: string) => {
     // Remove job posting
     const updatedJobs = jobPostings.filter((job) => job.id !== jobId)
@@ -127,12 +128,6 @@ export default function Dashboard() {
     localStorage.setItem("candidates", JSON.stringify(updatedCandidates))
 
     setDeleteJobId(null)
-  }
-
-  const handleJobUpdate = (updatedJob: JobPosting) => {
-    const updated = jobPostings.map((job) => (job.id === updatedJob.id ? updatedJob : job))
-    setJobPostings(updated)
-    localStorage.setItem("jobPostings", JSON.stringify(updated))
   }
 
   return (
@@ -161,20 +156,30 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {jobPostings.map((job) => (
-            <Card key={job.id} className="hover:shadow-lg transition-shadow cursor-pointer">
+            <Card key={job.id} className="hover:shadow-lg transition-shadow">
               <CardHeader>
                 <div className="flex justify-between items-start">
-                  <div>
+                  <div className="flex-1">
                     <CardTitle className="text-lg">{job.name}</CardTitle>
                     <CardDescription className="mt-2">{job.description.substring(0, 100)}...</CardDescription>
                   </div>
-                  <Badge
-                    variant={
-                      job.status === "active" ? "default" : job.status === "processing" ? "secondary" : "outline"
-                    }
-                  >
-                    {job.status}
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant={
+                        job.status === "active" ? "default" : job.status === "processing" ? "secondary" : "outline"
+                      }
+                    >
+                      {job.status}
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-red-600 hover:text-red-700 hover:bg-red-50 p-1"
+                      onClick={() => setDeleteJobId(job.id)}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
