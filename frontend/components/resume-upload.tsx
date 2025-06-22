@@ -66,34 +66,51 @@ export function ResumeUpload({ job, open, onOpenChange, onJobUpdate }: ResumeUpl
         const resume = parsedResumes[i]
         setProgress(40 + (i / parsedResumes.length) * 40)
 
-        if (resume.githubUrl) {
+        if (resume.github_username) {
           // Analyze with Gemini
           const analysis = await analyzeWithGemini(resume, job)
 
-          const candidate: Candidate = {
-            id: Date.now().toString() + i,
+          const newCandidatePayload = {
             name: resume.name,
             email: resume.email,
-            githubUrl: resume.githubUrl,
+            github_username: resume.github_username,
             resumeText: resume.text,
             score: analysis.overallScore,
             githubAnalysis: analysis.githubAnalysis,
             jobId: job.id,
+            extractedLinks: resume.links.map((link) => {
+              let type = "other"
+              if (link.includes("linkedin")) type = "linkedin"
+              if (link.includes("github")) type = "github"
+              if (link.includes("portfolio")) type = "portfolio"
+              return { url: link, type }
+            }),
+            resumeFile: {
+              type: resume.fileType,
+              data: Buffer.from(resume.fileContent).toString("base64"),
+            },
           }
 
-          candidates.push(candidate)
-          setResults((prev) => [...prev, `✓ Processed ${resume.name} (Score: ${analysis.overallScore}/100)`])
+          const response = await fetch("/api/candidates", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(newCandidatePayload),
+          })
+
+          if (!response.ok) {
+            throw new Error("Failed to save candidate.")
+          }
+
+          const savedCandidate: Candidate = await response.json()
+          candidates.push(savedCandidate)
+          setResults((prev) => [...prev, `✅ Successfully processed ${resume.name}`])
         } else {
           setResults((prev) => [...prev, `⚠ No GitHub URL found for ${resume.name}`])
         }
       }
 
-      // Save candidates
-      const existingCandidates = JSON.parse(localStorage.getItem("candidates") || "[]")
-      const allCandidates = [...existingCandidates, ...candidates]
-      localStorage.setItem("candidates", JSON.stringify(allCandidates))
-
-      // Update job
       const updatedJob = {
         ...job,
         candidateCount: job.candidateCount + candidates.length,

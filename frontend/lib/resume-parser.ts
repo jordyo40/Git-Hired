@@ -1,9 +1,18 @@
+import mammoth from "mammoth"
+import * as pdfjsLib from "pdfjs-dist"
+
+// Set up the worker source for pdfjs-dist
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`
+
 export interface ParsedResume {
   name: string
   email: string
-  githubUrl: string
+  github_username: string
   text: string
   filename: string
+  links: string[]
+  fileContent: ArrayBuffer
+  fileType: string
 }
 
 export async function parseResumes(files: File[]): Promise<ParsedResume[]> {
@@ -12,21 +21,43 @@ export async function parseResumes(files: File[]): Promise<ParsedResume[]> {
   for (const file of files) {
     try {
       let text = ""
+      const arrayBuffer = await file.arrayBuffer()
 
       if (file.type === "application/pdf") {
-        // For demo purposes, we'll simulate PDF parsing
-        // In a real implementation, you'd use a library like pdf-parse
-        text = await simulatePDFParsing(file)
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise
+        let content = ""
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i)
+          const textContent = await page.getTextContent()
+          content += textContent.items.map((item: any) => item.str).join(" ")
+        }
+        text = content
       } else if (file.type.includes("text") || file.name.endsWith(".txt")) {
-        text = await file.text()
+        // Use TextDecoder to handle ArrayBuffer -> string
+        text = new TextDecoder().decode(arrayBuffer)
+      } else if (
+        file.name.endsWith(".docx") ||
+        file.type ===
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      ) {
+        const result = await mammoth.extractRawText({
+          arrayBuffer: arrayBuffer.slice(0),
+        })
+        text = result.value
       } else {
-        // For other formats (DOC, DOCX), you'd need appropriate parsers
-        text = await simulateDocParsing(file)
+        console.warn(
+          `Unsupported file type: ${file.name} (${file.type}), skipping`,
+        )
+        continue
       }
 
       const parsed = extractResumeData(text, file.name)
       if (parsed) {
-        results.push(parsed)
+        results.push({
+          ...parsed,
+          fileContent: arrayBuffer,
+          fileType: file.type,
+        })
       }
     } catch (error) {
       console.error(`Error parsing ${file.name}:`, error)
@@ -36,75 +67,45 @@ export async function parseResumes(files: File[]): Promise<ParsedResume[]> {
   return results
 }
 
-async function simulatePDFParsing(file: File): Promise<string> {
-  // Simulate PDF parsing - in reality, you'd use pdf-parse or similar
-  return `
-    John Doe
-    Email: john.doe@example.com
-    Phone: (555) 123-4567
-    GitHub: https://github.com/johndoe
-    
-    EXPERIENCE
-    Senior Software Engineer at TechCorp (2020-2023)
-    - Developed React applications with TypeScript
-    - Built REST APIs using Node.js and Express
-    - Implemented CI/CD pipelines with GitHub Actions
-    
-    SKILLS
-    JavaScript, TypeScript, React, Node.js, Python, AWS, Docker   
-    
-    EDUCATION
-    Bachelor of Science in Computer Science
-    University of Technology (2016-2020)
-  `
-}
-
-async function simulateDocParsing(file: File): Promise<string> {
-  // Simulate DOC/DOCX parsing - in reality, you'd use mammoth.js or similar
-  return `
-    Jane Smith
-    jane.smith@email.com
-    GitHub: https://github.com/janesmith
-    
-    PROFESSIONAL SUMMARY
-    Full-stack developer with 5 years of experience in web development
-    
-    TECHNICAL SKILLS
-    - Frontend: React, Vue.js, Angular, HTML5, CSS3
-    - Backend: Node.js, Python, Java, PHP
-    - Databases: MongoDB, PostgreSQL, MySQL
-    - Cloud: AWS, Azure, Google Cloud Platform
-    
-    WORK EXPERIENCE
-    Full Stack Developer - WebSolutions Inc. (2021-Present)
-    - Built responsive web applications using React and Node.js
-    - Designed and implemented RESTful APIs
-    - Collaborated with cross-functional teams using Agile methodologies
-  `
-}
-
-function extractResumeData(text: string, filename: string): ParsedResume | null {
+function extractResumeData(
+  text: string,
+  filename: string,
+): Omit<ParsedResume, "fileContent" | "fileType"> | null {
   // Extract name (first line that looks like a name)
   const nameMatch = text.match(/^([A-Z][a-z]+ [A-Z][a-z]+)/m)
   const name = nameMatch ? nameMatch[1] : filename.replace(/\.[^/.]+$/, "")
+  console.log(`NAME: ${name}`)
 
   // Extract email
   const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i)
   const email = emailMatch ? emailMatch[1] : ""
+  console.log(`EMAIL: ${email}`)
 
   // Extract GitHub URL
-  const githubMatch = text.match(/(https?:\/\/github\.com\/[^\s)]+)/i)
-  const githubUrl = githubMatch ? githubMatch[1] : ""
+  const m = text.match(/github\.com\/([\w.-]+)/i);
+  const github_username = m ? m[1] : "";
+  console.log("GITHUB USERNAME:", github_username);
 
-  if (!githubUrl) {
-    console.warn(`No GitHub URL found in ${filename}`)
+  const links = getAllLinks(text);
+  console.log("LINKS:", links);
+
+  if (!github_username) {
+    console.warn(`No GitHub Username found in ${filename}`)
   }
 
   return {
     name,
     email,
-    githubUrl,
+    github_username,
     text,
     filename,
+    links,
   }
+}
+
+function getAllLinks(text: string) {
+  // This regex is designed to match a wide variety of URLs, including those with or without a protocol.
+  const urlPattern =
+    /\b((?:[a-z][\w-]+:(?:\/{1,3}|[a-z0-9%])|www\d{0,3}[.]|[a-z0-9.\-]+[.][a-z]{2,24}\/)(?:[^\s()<>]+|\(([^\s()<>]+|(\([^\s()<>]+\)))*\))+(?:\(([^\s()<>]+|(\([^\s()<>]+\)))*\)|[^\s`!()\[\]{};:'".,<>?«»""'']))/gi
+  return [...text.matchAll(urlPattern)].map((m) => m[0])
 }

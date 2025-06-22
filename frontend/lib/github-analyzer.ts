@@ -213,7 +213,7 @@ export class GitHubAnalyzer {
             path: file.path || "",
             content,
             language,
-            size: blob.size,
+            size: blob.size ?? 0,
           })
 
           languages[language] = (languages[language] || 0) + lines

@@ -1,14 +1,18 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import dynamic from "next/dynamic"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import { Plus, Users, FileText } from "lucide-react"
 import { JobPostingForm } from "@/components/job-posting-form"
-import { JobDetailsDialog } from "@/components/job-details-dialog"
 import { ResultsDialog } from "@/components/results-dialog"
+
+const JobDetailsDialog = dynamic(() => import("@/components/job-details-dialog").then(mod => mod.JobDetailsDialog), {
+  ssr: false,
+})
 
 export interface JobPosting {
   id: string
@@ -24,12 +28,14 @@ export interface Candidate {
   id: string
   name: string
   email: string
-  githubUrl: string
+  github_username: string
   resumeText: string
   score: number
   githubAnalysis: GitHubAnalysis
   jobId: string
   extractedLinks?: ExtractedLink[]
+  resumeFileId?: string
+  resumeFileType?: string
 }
 
 export interface ExtractedLink {

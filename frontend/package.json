@@ -1,6 +1,6 @@
 {
-  "name": "my-v0-project",
-  "version": "0.1.0",
+  "name": "git-hired",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "build": "next build",
@@ -47,9 +47,14 @@
     "embla-carousel-react": "8.5.1",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
+    "mammoth": "^1.9.1",
+    "mongodb": "^6.17.0",
     "next": "^14.2.30",
     "next-themes": "^0.4.4",
-    "react": "^18.3.1",
+
+    "pdf-parse": "^1.1.1",
+    "pdfjs-dist": "^5.3.31",
+    "react": "^18",
     "react-day-picker": "8.10.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.54.1",
@@ -63,6 +68,7 @@
   },
   "devDependencies": {
     "@types/node": "^22",
+    "@types/pdf-parse": "^1.1.5",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "autoprefixer": "^10.4.21",

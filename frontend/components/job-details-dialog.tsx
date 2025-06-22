@@ -1,13 +1,16 @@
 "use client"
 
 import { useState } from "react"
+import dynamic from "next/dynamic"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Eye, Upload, Users } from "lucide-react"
 import type { JobPosting } from "@/app/page"
-import { ResumeUpload } from "@/components/resume-upload"
+// import { ResumeUpload } from "@/components/resume-upload"
+
+const ResumeUpload = dynamic(() => import("@/components/resume-upload").then(mod => mod.ResumeUpload), { ssr: false })
 
 interface JobDetailsDialogProps {
   job: JobPosting
